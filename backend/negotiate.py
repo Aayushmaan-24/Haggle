@@ -3,10 +3,15 @@ import json
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+import time
 
 load_dotenv("../.env")
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+client = genai.Client(
+    api_key=os.environ["GEMINI_API_KEY"],
+    http_options=types.HttpOptions(timeout=20000),  # 20 seconds per call
+)
 MODEL = os.environ["GEMINI_MODEL"]
+MODELS = [MODEL, "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
 
 SCHEMA = {
     "type": "object",
@@ -22,18 +27,32 @@ SCHEMA = {
 
 
 def ask(system: str, prompt: str) -> dict:
-    r = client.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            response_mime_type="application/json",
-            response_schema=SCHEMA,
-            temperature=0.7,
-        ),
-    )
-    return json.loads(r.text)
-
+    last = None
+    for model in MODELS:
+        for attempt in range(3):
+            t0 = time.time()
+            try:
+                r = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        response_mime_type="application/json",
+                        response_schema=SCHEMA,
+                        temperature=0.7,
+                    ),
+                )
+                print(f"   [{model} {time.time() - t0:.1f}s]")
+                return json.loads(r.text)
+            except Exception as e:
+                last = e
+                msg = str(e)
+                print(f"   [retry] {model} attempt {attempt + 1} after {time.time() - t0:.1f}s: {msg[:90]}")
+                if any(k in msg for k in ("503", "429", "UNAVAILABLE", "timed out", "Timeout", "DEADLINE")):
+                    time.sleep(2 ** attempt)
+                    continue
+                raise
+    raise last
 
 def render(history) -> str:
     return "\n".join(
@@ -56,9 +75,11 @@ def seller_system(s) -> str:
 def buyer_system(m) -> str:
     return (
         f"You are a buyer agent purchasing {m['item']}. Your hard budget cap is ${m['budget']} "
-        f"and you need delivery within {m['max_delivery_days']} days. Never reveal the cap. "
-        f"Push for a lower price and a smaller deposit, but close if the deal is fair. "
-        f"Keep messages under 25 words. Actions: counter, accept (the seller's last offer), walk_away."
+        f"and your target price is ${m['target']}. Do not accept above the target until the final "
+        f"rounds. You need delivery within {m['max_delivery_days']} days. Never reveal the cap or "
+        f"target. Push for a smaller deposit. Only mention a competing price if one is given to "
+        f"you in the prompt, and use that exact number. Keep messages under 25 words. "
+        f"Actions: counter, accept (the seller's last offer), walk_away."
     )
 
 
