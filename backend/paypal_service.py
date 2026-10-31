@@ -59,9 +59,12 @@ def authorize(order_id: str) -> str:
     return r.json()["purchase_units"][0]["payments"]["authorizations"][0]["id"]
 
 
-def capture(authorization_id: str) -> dict:
+def capture(authorization_id: str, amount: str | None = None, final: bool = True) -> dict:
+    body = {"final_capture": final}
+    if amount:
+        body["amount"] = {"currency_code": "USD", "value": amount}
     r = _check(httpx.post(
         f"{BASE}/v2/payments/authorizations/{authorization_id}/capture",
-        headers=_headers(), json={"final_capture": True}, timeout=30,
+        headers=_headers(), json=body, timeout=30,
     ))
     return r.json()
