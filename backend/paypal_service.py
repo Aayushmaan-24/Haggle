@@ -38,8 +38,8 @@ def create_order(amount: str, seller_email: str) -> dict:
             "payee": {"email_address": seller_email},
         }],
         "payment_source": {"paypal": {"experience_context": {
-            "return_url": "http://localhost:8000/paypal/return",
-            "cancel_url": "http://localhost:8000/paypal/cancel",
+            "return_url": os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000") + "/paypal/return",
+            "cancel_url": os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000") + "/paypal/cancel",
             "user_action": "PAY_NOW",
         }}},
     }
