@@ -4,11 +4,12 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 import time
+import threading
 
 load_dotenv("../.env")
 client = genai.Client(
     api_key=os.environ["GEMINI_API_KEY"],
-    http_options=types.HttpOptions(timeout=20000),  # 20 seconds per call
+    http_options=types.HttpOptions(timeout=12000),  # 20 seconds per call
 )
 MODEL = os.environ["GEMINI_MODEL"]
 MODELS = [MODEL, "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
@@ -25,29 +26,30 @@ SCHEMA = {
     "required": ["action", "price", "deposit_percent", "delivery_days", "message"],
 }
 
-
+GATE = threading.Semaphore(2)  # at most 2 calls
 def ask(system: str, prompt: str, schema: dict = SCHEMA) -> dict:
     last = None
     for model in MODELS:
         for attempt in range(3):
             t0 = time.time()
             try:
-                r = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        response_mime_type="application/json",
-                        response_schema=schema,
-                        temperature=0.7,
-                    ),
-                )
+                with GATE:
+                    r = client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system,
+                            response_mime_type="application/json",
+                            response_schema=schema,
+                            temperature=0.7,
+                        ),
+                    )
                 print(f"   [{model} {time.time() - t0:.1f}s]")
                 return json.loads(r.text)
             except Exception as e:
                 last = e
                 msg = str(e)
-                print(f"   [retry] {model} attempt {attempt + 1} after {time.time() - t0:.1f}s: {msg[:90]}")
+                print(f"   [retry] {model} attempt {attempt + 1} after {time.time() - t0:.1f}s: {msg[:70]}")
                 if any(k in msg for k in ("503", "429", "UNAVAILABLE", "timed out", "Timeout", "DEADLINE")):
                     time.sleep(2 ** attempt)
                     continue
