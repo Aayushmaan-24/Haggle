@@ -3,6 +3,8 @@ import os
 import queue
 import threading
 import uuid
+from pydantic import BaseModel
+import policy_compiler
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -22,6 +24,7 @@ SELLER_EMAILS = {
     "Premium Hub": os.environ.get("SELLER_EMAIL_PREMIUM_HUB"),
 }
 DEALS: dict[str, dict] = {}  # in-memory: Render's free disk is ephemeral
+POLICIES: dict[str, dict] = {}
 
 app = FastAPI()
 app.add_middleware(
@@ -39,9 +42,22 @@ def public(d: dict) -> dict:
 
 
 @app.get("/api/negotiate")
-def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch monitor"):
+def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch monitor",
+              policy_id: str | None = None):
     if not (0 < target <= budget):
         raise HTTPException(400, "target must be positive and not above budget")
+    sellers = list(market.SELLERS)
+    if policy_id:
+        p = POLICIES.get(policy_id)
+        if not p:
+            raise HTTPException(404, "unknown policy")
+        name = p["name"]
+        if name in {s["name"] for s in sellers}:
+            name += " (You)"
+        sellers.append({"name": name, "personality": p["personality"],
+                        "list_price": p["list_price"], "floor": p["floor"],
+                        "delivery_days": p["delivery_days"],
+                        "deposit_percent": p["deposit_percent"]})
     mandate = {**market.MANDATE, "item": item, "budget": budget, "target": target}
     q: queue.Queue = queue.Queue()
 
@@ -63,7 +79,7 @@ def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch mon
 
     def worker():
         try:
-            market.run(mandate=mandate, emit=emit)
+            market.run(sellers=sellers, mandate=mandate, emit=emit)
         except Exception as ex:
             q.put({"type": "error", "message": str(ex)[:200]})
         q.put(None)
@@ -95,7 +111,7 @@ def pay(deal_id: str):
         raise HTTPException(404, "unknown deal")
     if d["status"] != "negotiated":
         raise HTTPException(409, f'deal is already {d["status"]}')
-    email = SELLER_EMAILS.get(d["seller"])
+    email = SELLER_EMAILS.get(d["seller"]) or os.environ.get("SELLER_EMAIL_CUSTOM")
     if not email:
         raise HTTPException(500, f'no sandbox email configured for {d["seller"]}')
     o = pp.create_order(f'{d["total"]:.2f}', email)
@@ -131,6 +147,19 @@ def deliver(deal_id: str):
     d["status"] = "complete"
     return public(d)
 
+class RulesIn(BaseModel):
+    rules: str
+
+
+@app.post("/api/policy/compile")
+@app.post("/api/policy/compile")
+def compile_policy(body: RulesIn):
+    if not body.rules.strip() or len(body.rules) > 2000:
+        raise HTTPException(400, "rules must be 1 to 2000 characters")
+    policy = policy_compiler.compile_rules(body.rules)
+    pid = uuid.uuid4().hex[:12]
+    POLICIES[pid] = policy
+    return {**policy, "policy_id": pid}
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "frontend", "out")
 if os.path.isdir(OUT):  # must stay last so it never shadows the routes above

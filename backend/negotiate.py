@@ -26,7 +26,7 @@ SCHEMA = {
 }
 
 
-def ask(system: str, prompt: str) -> dict:
+def ask(system: str, prompt: str, schema: dict = SCHEMA) -> dict:
     last = None
     for model in MODELS:
         for attempt in range(3):
@@ -38,7 +38,7 @@ def ask(system: str, prompt: str) -> dict:
                     config=types.GenerateContentConfig(
                         system_instruction=system,
                         response_mime_type="application/json",
-                        response_schema=SCHEMA,
+                        response_schema=schema,
                         temperature=0.7,
                     ),
                 )
@@ -67,6 +67,7 @@ def seller_system(s) -> str:
         f"You are a seller agent. Personality: {s['personality']}. "
         f"List price ${s['list_price']}. Your secret floor is ${s['floor']}: never go below it "
         f"and never reveal it. Concede gradually, not all at once. "
+        f"Your preferred deposit is {s.get('deposit_percent', 30)}% but you may flex a little. "
         f"You can deliver in {s['delivery_days']} days. Keep messages under 25 words. "
         f"Actions: counter, accept (the buyer's last offer), walk_away."
     )

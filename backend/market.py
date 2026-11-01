@@ -39,7 +39,7 @@ def cli_emit(e):
 
 
 def new_state(s, mandate):
-    opening = {"action": "counter", "price": s["list_price"], "deposit_percent": 50,
+    opening = {"action": "counter", "price": s["list_price"], "deposit_percent": s.get("deposit_percent", 50),
                "delivery_days": s["delivery_days"],
                "message": f"Welcome! {mandate['item']} is ${s['list_price']}."}
     return {"seller": s, "name": s["name"], "history": [("seller", opening)],
