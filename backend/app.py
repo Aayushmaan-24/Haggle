@@ -5,7 +5,7 @@ import threading
 import uuid
 from pydantic import BaseModel
 import policy_compiler
-
+import time
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +26,16 @@ SELLER_EMAILS = {
 DEALS: dict[str, dict] = {}  # in-memory: Render's free disk is ephemeral
 POLICIES: dict[str, dict] = {}
 
+REPLAY_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "replay.json")
+
+
+def play_replay(emit):
+    with open(REPLAY_PATH) as f:
+        events = json.load(f)
+    for e in events:
+        emit(e)
+        time.sleep(0.8 if e["type"] == "offer" else 0.3)
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -43,7 +53,7 @@ def public(d: dict) -> dict:
 
 @app.get("/api/negotiate")
 def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch monitor",
-              policy_id: str | None = None):
+              policy_id: str | None = None, replay: bool = False):
     if not (0 < target <= budget):
         raise HTTPException(400, "target must be positive and not above budget")
     sellers = list(market.SELLERS)
@@ -79,9 +89,21 @@ def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch mon
 
     def worker():
         try:
-            market.run(sellers=sellers, mandate=mandate, emit=emit)
+            if replay:
+                play_replay(emit)
+            else:
+                market.run(sellers=sellers, mandate=mandate, emit=emit)
         except Exception as ex:
-            q.put({"type": "error", "message": str(ex)[:200]})
+            if os.path.exists(REPLAY_PATH):
+                q.put({"type": "reset"})
+                q.put({"type": "notice",
+                       "message": "Live models are busy, so this is a recorded negotiation."})
+                try:
+                    play_replay(emit)
+                except Exception as ex2:
+                    q.put({"type": "error", "message": str(ex2)[:200]})
+            else:
+                q.put({"type": "error", "message": str(ex)[:200]})
         q.put(None)
 
     threading.Thread(target=worker, daemon=True).start()
