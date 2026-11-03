@@ -21,6 +21,21 @@ def scenario(i: int, rng: random.Random):
     return sellers, mandate
 
 
+def save(rows, violations):
+    done = [r for r in rows if r["deal"]]
+    summary = {
+        "runs": len(rows),
+        "deal_rate_pct": round(len(done) / len(rows) * 100, 1) if rows else 0,
+        "avg_saving_vs_list_pct": round(sum(r["saving_vs_list"] for r in done) / len(done), 1) if done else 0,
+        "avg_saving_vs_cheapest_list_pct": round(sum(r["saving_vs_cheapest"] for r in done) / len(done), 1) if done else 0,
+        "guard_violations": violations,
+    }
+    os.makedirs("../data", exist_ok=True)
+    with open("../data/benchmark.json", "w") as f:
+        json.dump({"summary": summary, "runs": rows}, f, indent=2)
+    return summary
+
+
 def main(n: int):
     rng = random.Random(42)  # fixed seed: the benchmark is reproducible
     rows, violations = [], 0
@@ -30,7 +45,7 @@ def main(n: int):
         try:
             w = market.run(sellers=sellers, mandate=mandate, emit=lambda e: None)
         except Exception as ex:
-            print("   run failed:", str(ex)[:100])
+            print("   run failed:", str(ex)[:100], flush=True)
             continue
         row = {"budget": mandate["budget"], "target": mandate["target"], "deal": bool(w)}
         if w:
@@ -43,24 +58,15 @@ def main(n: int):
                        saving_vs_list=round((s["list_price"] - w["price"]) / s["list_price"] * 100, 1),
                        saving_vs_cheapest=round((cheapest_list - w["price"]) / cheapest_list * 100, 1),
                        guard_ok=ok)
-            print(f"   winner {w['seller']} at ${w['price']} ({row['saving_vs_list']}% off list)")
+            print(f"   winner {w['seller']} at ${w['price']} ({row['saving_vs_list']}% off list)", flush=True)
         else:
-            print("   no deal")
+            print("   no deal", flush=True)
         rows.append(row)
+        save(rows, violations)
         time.sleep(5)  # stay under free-tier rate limits
 
-    done = [r for r in rows if r["deal"]]
-    summary = {
-        "runs": len(rows),
-        "deal_rate_pct": round(len(done) / len(rows) * 100, 1) if rows else 0,
-        "avg_saving_vs_list_pct": round(sum(r["saving_vs_list"] for r in done) / len(done), 1) if done else 0,
-        "avg_saving_vs_cheapest_list_pct": round(sum(r["saving_vs_cheapest"] for r in done) / len(done), 1) if done else 0,
-        "guard_violations": violations,
-    }
-    print("\nSUMMARY", json.dumps(summary, indent=2))
-    os.makedirs("../data", exist_ok=True)
-    with open("../data/benchmark.json", "w") as f:
-        json.dump({"summary": summary, "runs": rows}, f, indent=2)
+    summary = save(rows, violations)
+    print("\nSUMMARY", json.dumps(summary, indent=2), flush=True)
 
 
 if __name__ == "__main__":
