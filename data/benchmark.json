@@ -1,0 +1,88 @@
+{
+  "summary": {
+    "runs": 7,
+    "deal_rate_pct": 100.0,
+    "avg_saving_vs_list_pct": 8.3,
+    "avg_saving_vs_cheapest_list_pct": 6.6,
+    "guard_violations": 0
+  },
+  "runs": [
+    {
+      "budget": 45.12,
+      "target": 42.41,
+      "deal": true,
+      "seller": "Flex Ltd",
+      "price": 42.68,
+      "list_price": 47.97,
+      "saving_vs_list": 11.0,
+      "saving_vs_cheapest": 11.0,
+      "guard_ok": true
+    },
+    {
+      "budget": 994.02,
+      "target": 934.38,
+      "deal": true,
+      "seller": "Flex Ltd",
+      "price": 915.0,
+      "list_price": 958.85,
+      "saving_vs_list": 4.6,
+      "saving_vs_cheapest": 4.6,
+      "guard_ok": true
+    },
+    {
+      "budget": 194.58,
+      "target": 182.91,
+      "deal": true,
+      "seller": "Firm Co",
+      "price": 183.75,
+      "list_price": 207.09,
+      "saving_vs_list": 11.3,
+      "saving_vs_cheapest": 10.6,
+      "guard_ok": true
+    },
+    {
+      "budget": 985.69,
+      "target": 926.55,
+      "deal": true,
+      "seller": "Flex Ltd",
+      "price": 933.25,
+      "list_price": 989.53,
+      "saving_vs_list": 5.7,
+      "saving_vs_cheapest": 5.7,
+      "guard_ok": true
+    },
+    {
+      "budget": 933.95,
+      "target": 877.91,
+      "deal": true,
+      "seller": "Flex Ltd",
+      "price": 878.5,
+      "list_price": 955.5,
+      "saving_vs_list": 8.1,
+      "saving_vs_cheapest": 8.1,
+      "guard_ok": true
+    },
+    {
+      "budget": 102.94,
+      "target": 96.76,
+      "deal": true,
+      "seller": "Firm Co",
+      "price": 97.25,
+      "list_price": 111.58,
+      "saving_vs_list": 12.8,
+      "saving_vs_cheapest": 1.6,
+      "guard_ok": true
+    },
+    {
+      "budget": 194.18,
+      "target": 182.53,
+      "deal": true,
+      "seller": "Flex Ltd",
+      "price": 180.0,
+      "list_price": 188.02,
+      "saving_vs_list": 4.3,
+      "saving_vs_cheapest": 4.3,
+      "guard_ok": true
+    }
+  ]
+}
