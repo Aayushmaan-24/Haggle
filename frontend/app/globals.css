@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/*
+ * Haggle design tokens — purple AI-tech palette.
+ *
+ * Primary purple for buttons, active nav, focus states and key interactive
+ * elements. Lavender for subtle highlights and secondary accents. Only where a
+ * colour receives a gradient does one appear, kept faint.
+ */
+@theme {
+  --color-canvas: #090711;
+  --color-surface: #171126;
+  --color-surface-2: #211832;
+  --color-surface-3: #2b2045;
+
+  --color-line: #382452;
+  --color-line-strong: #5b3f7a;
+
+  --color-ink: #f3edff;
+  --color-muted: #a99bbf;
+  --color-faint: #766790;
+
+  --color-accent: #8055e8;
+  --color-accent-hover: #9b6ff0;
+  --color-accent-pressed: #6a44c0;
+  --color-accent-soft: rgb(128 85 232 / 0.10);
+  --color-accent-ring: rgb(128 85 232 / 0.35);
+
+  --color-lavender: #b58aff;
+  --color-lavender-soft: rgb(181 138 255 / 0.08);
+  --color-lavender-linethin: rgb(181 138 255 / 0.14);
+
+  --color-success: #a6e3c1;
+  --color-success-soft: rgb(166 227 193 / 0.10);
+  --color-warning: #d29922;
+  --color-warning-soft: rgb(210 153 34 / 0.10);
+  --color-danger: #f85149;
+  --color-danger-soft: rgb(248 81 73 / 0.10);
+  --color-info: #39c5cf;
+  --color-info-soft: rgb(57 197 207 / 0.10);
+
+  --color-paypal: #ffc439;
+  --color-paypal-ink: #003087;
+
+  --radius-panel: 12px;
+  --radius-sm: 7px;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    /* Seller lane hues (by index). Never used for body text. */
+    --seller-1: #8055e8;
+    --seller-2: #b58aff;
+    --seller-3: #39c5cf;
+    --seller-4: #e3b341;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: rgb(128 85 232 / 0.30);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
