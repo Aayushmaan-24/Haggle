@@ -32,15 +32,15 @@ const EXAMPLE_RULES =
 const STEPS = [
   {
     title: "Write the rules",
-    body: `Say how you sell in plain English — a price, a floor, a deposit, a delivery time. The backend accepts 1 to ${MAX_RULES} characters.`,
+    body: "Describe your price, floor, deposit and delivery time in plain English.",
   },
   {
     title: "Compile",
-    body: "A model extracts the fields, then code clamps each number to a valid range before the policy is stored in server memory.",
+    body: "A model extracts the fields; code clamps each number to a valid range.",
   },
   {
     title: "Join the market",
-    body: "The compiled policy is remembered in this browser so the Trading Floor can select it. A live negotiation started with its id adds your shop as a fourth seller; replay mode ignores policies.",
+    body: "The policy is saved in this browser and joins live negotiations as a fourth seller. Replay ignores policies.",
   },
 ];
 
@@ -49,66 +49,66 @@ const COMPILED_FIELDS = [
   {
     label: "Shop name",
     range: "Up to 40 characters",
-    note: "Falls back to “My Shop” when the compiler returns nothing.",
+    note: "Falls back to “My Shop”.",
   },
   {
     label: "List price",
     range: "At least $1.00",
-    note: "The opening price your seller quotes, before any discount.",
+    note: "Your opening price before any discount.",
   },
   {
     label: "Floor",
     range: "$0 up to the list price",
-    note: "The lowest offer your seller accepts. Clamped so it can never exceed list.",
+    note: "Lowest accepted offer; clamped to the list price.",
   },
   {
     label: "Deposit",
     range: "0–100%",
-    note: "Share of the total captured up front; the balance is due on delivery.",
+    note: "Captured up front; the rest is due on delivery.",
   },
   {
     label: "Delivery",
     range: "1–30 whole days",
-    note: "Fixed for the whole negotiation — the model cannot extend it mid-round.",
+    note: "Fixed for the whole negotiation.",
   },
   {
     label: "Personality",
     range: "Up to 120 characters",
-    note: "A short negotiating style injected into the seller's prompts.",
+    note: "Negotiating style for the seller's prompts.",
   },
   {
     label: "Notes",
     range: "Up to 300 characters",
-    note: "The compiler's remarks about numbers it had to assume.",
+    note: "Remarks about numbers the compiler assumed.",
   },
 ];
 
 const GUARDRAILS = [
-  "An offer below the shop's floor is rejected and corrected in code before it is recorded.",
-  "A seller reply cannot change the declared delivery time; code resets it on every round.",
-  `The buyer's delivery cap is fixed at ${NEGOTIATE_DEFAULTS.maxDeliveryDays} days, so a slower seller is marked out during the opening offers.`,
-  "The buyer never accepts above its budget, nor above its target while rounds remain.",
-  "A shop name that matches a default seller (Firm Co, Flex Ltd, Premium Hub) gets “ (You)” appended, so lanes stay distinct.",
-  "Policies live in server memory only. There is no endpoint to list, reload or edit one after it is compiled.",
+  "An offer below the shop's floor is rejected and corrected.",
+  "A reply cannot change the declared delivery time.",
+  `The buyer's cap is fixed at ${NEGOTIATE_DEFAULTS.maxDeliveryDays} days, so slower sellers are marked out early.`,
+  "The buyer never accepts above budget, nor above target while rounds remain.",
+  "A name matching a default seller gets “ (You)” appended, so lanes stay distinct.",
+  "Policies live in server memory only — there is no listing, reload or edit endpoint.",
 ];
 
 const NEXT_LINKS = [
   {
     href: "/trading-floor",
     label: "Trading Floor",
-    body: "Run and watch a live negotiation.",
+    body: "Watch a live negotiation.",
     icon: Handshake,
   },
   {
     href: "/benchmark",
     label: "Benchmark",
-    body: "See recorded runs and guard results.",
+    body: "Recorded runs and guard results.",
     icon: TrendingUp,
   },
   {
     href: "/",
     label: "Overview",
-    body: "How the whole flow fits together.",
+    body: "How the flow fits together.",
     icon: LayoutDashboard,
   },
 ];
@@ -176,7 +176,7 @@ export default function PolicyPage() {
       <PageHeader
         eyebrow="Seller Console"
         title="Seller Policy"
-        description="Describe how your shop sells in plain English. The compiler turns those rules into a structured seller policy — name, list price, floor, deposit and delivery — that the negotiation engine enforces in code."
+        description="Describe your selling rules in plain English; they compile into a structured seller policy the engine enforces in code."
         actions={
           <ButtonLink href="/trading-floor" variant="secondary">
             Open Trading Floor
@@ -212,8 +212,7 @@ export default function PolicyPage() {
             Compile your rules
           </h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            Nothing is sent until you compile. The result is a new policy, not an
-            edit of an earlier one.
+            Nothing is sent until you compile. Each compile creates a new policy.
           </p>
         </div>
 
@@ -229,8 +228,8 @@ export default function PolicyPage() {
             id="rules-help"
             className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted"
           >
-            Mention any prices, percentages, delivery times or shop name you care
-            about. Numbers the compiler has to guess are listed in its notes.
+            Include prices, percentages, delivery times or a shop name. Guessed
+            numbers appear in the notes.
           </p>
 
           <textarea
@@ -281,8 +280,7 @@ export default function PolicyPage() {
 
           <div className="mt-5 flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[12px] leading-relaxed text-muted">
-              Compiling calls the model, so it can take a few seconds and may fail
-              when the free tier is busy.
+              Compiling calls the model and can take a few seconds.
             </p>
             <Button type="submit" disabled={compiling} className="shrink-0">
               {compiling ? "Compiling…" : "Compile policy"}
@@ -299,10 +297,7 @@ export default function PolicyPage() {
         </form>
 
         {compiling ? (
-          <LoadingState
-            variant="pulse"
-            description="Reading your rules and settling on the policy fields…"
-          />
+          <LoadingState variant="pulse" description="Compiling policy…" />
         ) : null}
 
         {status === "error" && error ? (
@@ -324,7 +319,7 @@ export default function PolicyPage() {
         {status === "idle" ? (
           <EmptyState
             title="No policy compiled in this session"
-            description="Your compiled fields appear here. The backend exposes no endpoint for listing or reloading policies, so earlier ones cannot be shown — and a server restart clears them."
+            description="Compiled fields appear here. Policies live in server memory, so a restart clears them."
           />
         ) : null}
       </section>
@@ -338,8 +333,7 @@ export default function PolicyPage() {
             What you control, and what code decides
           </h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            Your rules set the numbers. The ranges below are applied afterwards and
-            cannot be overridden from this screen.
+            Your rules set the numbers; the ranges below are applied afterwards.
           </p>
         </div>
 
@@ -348,9 +342,6 @@ export default function PolicyPage() {
             <h3 className="text-sm font-semibold text-ink">
               Fields the compiler extracts
             </h3>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted">
-              Every value is clamped to its range after the model responds.
-            </p>
             <ul className="mt-4">
               {COMPILED_FIELDS.map((field) => (
                 <li
@@ -377,9 +368,6 @@ export default function PolicyPage() {
             <h3 className="text-sm font-semibold text-ink">
               Fixed guardrails
             </h3>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted">
-              Enforced by the negotiation engine on both sides of the table.
-            </p>
             <ul className="mt-4 space-y-2.5">
               {GUARDRAILS.map((guard) => (
                 <li key={guard} className="flex gap-2.5">
@@ -467,9 +455,6 @@ function CompiledPolicyCard({ policy }: { policy: CompiledPolicy }) {
             policy_id {policy.policy_id}
           </p>
         </div>
-        <p className="text-[12px] leading-relaxed text-muted sm:max-w-[16rem] sm:text-right">
-          Held in server memory. A server restart clears it.
-        </p>
       </div>
 
       <dl className="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2">
@@ -511,15 +496,15 @@ function CompiledPolicyCard({ policy }: { policy: CompiledPolicy }) {
             aria-hidden="true"
           />
           This policy promises {policy.delivery_days} days, beyond the buyer’s
-          fixed {NEGOTIATE_DEFAULTS.maxDeliveryDays}-day cap. That seller would be
-          marked out during the opening offers instead of competing.
+          {NEGOTIATE_DEFAULTS.maxDeliveryDays}-day cap — that seller would be marked
+          out during opening offers.
         </p>
       ) : null}
 
       <div className="mt-5 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-md text-[12px] leading-relaxed text-muted">
-          Saved in this browser so the Trading Floor can offer it for the next
-          negotiation. The policy itself stays in backend memory.
+          Saved in this browser for the Trading Floor; the policy itself lives in
+          server memory.
         </p>
         <Link
           href="/trading-floor"

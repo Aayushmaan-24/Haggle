@@ -368,7 +368,7 @@ export default function TradingFloorPage() {
       <PageHeader
         eyebrow="Negotiation"
         title="Trading Floor"
-        description="Give the buyer agent a mandate, then watch it negotiate price, deposit and delivery with every seller in parallel — using real competing offers as leverage."
+        description="Set a mandate, then watch the buyer agent negotiate price, deposit and delivery with every seller in parallel."
         actions={
           <div className="flex shrink-0 items-center gap-2">
             {canStop ? (
@@ -392,7 +392,7 @@ export default function TradingFloorPage() {
             <PanelHeader
               eyebrow="Setup"
               title="Negotiation setup"
-              description="The buyer agent negotiates within these limits. Nothing is sent until you start."
+              description="The agent negotiates within these limits."
             />
 
             <div className="space-y-4">
@@ -414,11 +414,7 @@ export default function TradingFloorPage() {
                   <p id="item-error" className="text-xs text-danger">
                     {itemError}
                   </p>
-                ) : (
-                  <p className="text-xs text-muted">
-                    Describe the product the agent should buy.
-                  </p>
-                )}
+                ) : null}
               </div>                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 <div className="space-y-1.5">
                   <label htmlFor="budget" className="block text-xs text-muted">
@@ -504,22 +500,22 @@ export default function TradingFloorPage() {
                 </select>
                 <p id="policy-help" className="text-xs leading-relaxed text-muted">
                   {replay ? (
-                    "Replay reuses a recorded run, so a compiled policy is not used."
+                    "Replay uses a recorded run and ignores policies."
                   ) : savedPolicies.length === 0 ? (
                     <>
-                      No compiled policies are saved in this browser.{" "}
+                      No policies saved in this browser.{" "}
                       <Link
                         href="/policy"
                         className="text-lavender underline-offset-2 hover:underline"
                       >
-                        Compile a seller policy
+                        Compile one
                       </Link>{" "}
-                      to add one.
+                      to add a seller.
                     </>
                   ) : selectedPolicy ? (
-                    `List $${selectedPolicy.list_price.toFixed(2)} · floor $${selectedPolicy.floor.toFixed(2)} · ${selectedPolicy.deposit_percent}% deposit · ${selectedPolicy.delivery_days} ${selectedPolicy.delivery_days === 1 ? "day" : "days"}. The backend checks this ID when the negotiation starts.`
+                    `List $${selectedPolicy.list_price.toFixed(2)} · floor $${selectedPolicy.floor.toFixed(2)} · ${selectedPolicy.deposit_percent}% deposit · ${selectedPolicy.delivery_days} ${selectedPolicy.delivery_days === 1 ? "day" : "days"}.`
                   ) : (
-                    "No policy selected, so the negotiation uses the three default sellers."
+                    "Using the three default sellers."
                   )}
                 </p>
                 {selectedPolicy && !replay ? (
@@ -533,9 +529,8 @@ export default function TradingFloorPage() {
                     className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2.5"
                   >
                     <p className="text-xs leading-relaxed text-danger">
-                      The backend no longer has “{failedPolicy.name}” in memory —
-                      a server restart clears compiled policies. Remove it here,
-                      or choose another policy and start again.
+                      The backend no longer has “{failedPolicy.name}” — a restart
+                      clears policies. Remove it or choose another.
                     </p>
                     <Button
                       variant="secondary"
@@ -563,8 +558,7 @@ export default function TradingFloorPage() {
                       Replay mode
                     </label>
                     <p className="text-xs leading-relaxed text-muted">
-                      Reuse the recorded run from the backend. No live models, no rate
-                      limits.
+                      Play back a recorded run. No live models or rate limits.
                     </p>
                   </div>
                 </div>
@@ -597,13 +591,12 @@ export default function TradingFloorPage() {
 
               {state.result && canStop ? (
                 <p className="text-xs text-muted">
-                  Stop listening to close this session before starting a new one.
+                  Stop listening to start a new negotiation.
                 </p>
               ) : null}
 
               <p className="text-xs leading-relaxed text-muted">
-                Stopping only closes this page&apos;s stream — the backend keeps
-                negotiating.
+                Stopping closes this page&apos;s stream only.
               </p>
             </div>
           </Panel>
@@ -654,26 +647,18 @@ export default function TradingFloorPage() {
 
           {!hasActivity ? (
             <Panel>
-              <PanelHeader
-                eyebrow="Arena"
-                title="Live negotiation arena"
-                description="Seller lanes, offers and rounds will appear here as soon as the stream opens."
-              />
+              <PanelHeader eyebrow="Arena" title="Live negotiation arena" />
               <EmptyState
                 title="No negotiation running"
-                description="Set your mandate and press Start negotiation to open the stream."
+                description="Set a mandate, then press Start negotiation."
               />
             </Panel>
           ) : state.connectionStatus === "connecting" && state.events.length === 0 ? (
             <Panel>
-              <PanelHeader
-                eyebrow="Arena"
-                title="Opening the stream"
-                description="Waiting for the first events from the buyer agent."
-              />
+              <PanelHeader eyebrow="Arena" title="Opening the stream" />
               <LoadingState
                 variant="pulse"
-                description="Streaming negotiation events from the backend…"
+                description="Waiting for the first events…"
               />
             </Panel>
           ) : (
@@ -685,10 +670,10 @@ export default function TradingFloorPage() {
                   title="Live negotiation"
                   description={
                     state.result
-                      ? "The stream has delivered a final result."
+                      ? "Final result received."
                       : state.connectionStatus === "closed"
-                        ? "This page stopped listening; rounds below are the last known state."
-                        : "Rounds advance as the backend emits them — there is no fixed round count."
+                        ? "Stopped; showing the last known state."
+                        : "Rounds advance as the backend emits them."
                   }
                   action={
                     <span className="flex flex-wrap items-center gap-2">
@@ -879,7 +864,7 @@ export default function TradingFloorPage() {
                   <PanelHeader
                     eyebrow="Timeline"
                     title="Negotiation timeline"
-                    description="Chronological stream order. The backend sends no timestamps, so events are ordered by arrival."
+                    description="In arrival order; the backend sends no timestamps."
                   />
                   <ol className="max-h-[320px] space-y-0 overflow-y-auto pr-1 sm:max-h-[420px]">
                     {timeline.length === 0 ? (
@@ -900,7 +885,6 @@ export default function TradingFloorPage() {
                   <PanelHeader
                     eyebrow="Offers"
                     title="Received offers"
-                    description="Every buyer and seller offer in arrival order."
                   />
                   <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
                     {state.offers.map((offer, index) => (
@@ -962,9 +946,6 @@ export default function TradingFloorPage() {
                           <h3 className="mt-1 break-words text-xl font-semibold tracking-[-0.01em] text-ink">
                             Deal reached with {state.result.winner.seller}
                           </h3>
-                          <p className="mt-1 text-sm leading-relaxed text-muted">
-                            The buyer agent accepted this seller&apos;s offer.
-                          </p>
                         </div>
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-success/40 bg-success-soft px-3 py-1 text-[12px] font-medium text-success">
                           <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
@@ -1015,10 +996,10 @@ export default function TradingFloorPage() {
                           </h3>
                           <p className="mt-1 text-sm leading-relaxed text-muted">
                             {state.result.ranking.length > 0
-                              ? `The final ranking lists ${state.result.ranking.length} seller${
+                              ? `${state.result.ranking.length} seller${
                                   state.result.ranking.length === 1 ? "" : "s"
-                                }, but the backend returned no winner.`
-                              : "The backend returned a result with an empty ranking and no winner."}
+                                } ranked, but no winner was returned.`
+                              : "The result has an empty ranking and no winner."}
                           </p>
                         </div>
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning-soft px-3 py-1 text-[12px] font-medium text-warning">
@@ -1056,8 +1037,7 @@ export default function TradingFloorPage() {
                         </span>
                       </div>
                       <p className="mt-4 border-t border-line pt-4 text-xs text-muted">
-                        Error and notice events also appear in the timeline. Adjust the
-                        mandate and start again when the backend is reachable.
+                        Error and notice events also appear in the timeline.
                       </p>
                     </Panel>
                   ) : (
@@ -1071,8 +1051,8 @@ export default function TradingFloorPage() {
                             Negotiation interrupted
                           </h3>
                           <p className="mt-1 text-sm leading-relaxed text-muted">
-                            You stopped listening before the stream delivered a result. The
-                            backend negotiation may still be running.
+                            Stopped before a result arrived. The backend may still be
+                            negotiating.
                           </p>
                         </div>
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-[12px] font-medium text-muted">
@@ -1091,8 +1071,8 @@ export default function TradingFloorPage() {
                         title="Offer comparison"
                         description={
                           state.result
-                            ? "Final offers in the backend's own ranking order."
-                            : "Latest seller offer from each lane. The backend has not produced a final ranking yet."
+                            ? "Final offers in the backend's ranking order."
+                            : "Latest offer from each seller."
                         }
                       />
                       <ul className="divide-y divide-line">
@@ -1194,14 +1174,13 @@ export default function TradingFloorPage() {
                         {state.result?.winner
                           ? "the winning offer"
                           : "the lowest current offer"}
-                        . Values come only from the stream and the final result.
+                        .
                       </p>
                     </Panel>
                   ) : (
                     <div className="rounded-panel border border-dashed border-line px-4 py-6 text-center">
                       <p className="text-sm text-muted">
-                        No seller offers were recorded in this session, so there is
-                        nothing to compare.
+                        No seller offers were recorded.
                       </p>
                     </div>
                   )}
@@ -1212,7 +1191,6 @@ export default function TradingFloorPage() {
                       <PanelHeader
                         eyebrow="Deal"
                         title="Deal summary"
-                        description="Hydrated from GET /api/deals/{id}."
                         action={
                           <span className="break-all font-mono text-xs text-lavender">
                             {state.deal.deal_id}
@@ -1292,11 +1270,9 @@ export default function TradingFloorPage() {
                       />
                       {dealUnavailable ? (
                         <p className="break-words text-sm leading-relaxed text-danger">
-                          The result references deal{" "}
-                          <span className="font-mono">{state.result.deal_id}</span>, but{" "}
-                          <span className="font-mono">GET /api/deals/{state.result.deal_id}</span>{" "}
-                          failed: {state.error}. The outcome above is still what the stream
-                          reported.
+                          Deal{" "}
+                          <span className="font-mono">{state.result.deal_id}</span> could
+                          not be loaded: {state.error}. The outcome above is unchanged.
                         </p>
                       ) : (
                         <LoadingState
@@ -1319,12 +1295,12 @@ export default function TradingFloorPage() {
                       <PanelHeader
                         eyebrow="Deal"
                         title="Deal summary"
-                        description="No deal reference was included in the final result."
+                        description="No deal reference in the final result."
                       />
                       <p className="text-sm leading-relaxed text-muted">
-                        The stream reported a winner but no{" "}
+                        The result has a winner but no{" "}
                         <span className="font-mono">deal_id</span>, so there is no hydrated
-                        deal to show. The winning offer above is the only confirmed detail.
+                        deal to show.
                       </p>
                     </Panel>
                   ) : null}

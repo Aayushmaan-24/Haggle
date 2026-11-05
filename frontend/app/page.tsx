@@ -23,19 +23,19 @@ export const metadata: Metadata = {
 const STEPS = [
   {
     title: "Set the mandate",
-    body: "Item, budget, target price and a fixed 7-day delivery cap. The agent negotiates inside these limits and cannot accept terms outside them.",
+    body: "Item, budget, target price and a 7-day delivery cap. The agent cannot accept terms outside them.",
   },
   {
     title: "Negotiate in parallel",
-    body: "Buyer and seller agents trade offers across several rounds, moving price, deposit percentage and delivery days.",
+    body: "Buyer and seller agents trade offers over several rounds.",
   },
   {
     title: "Rank the offers",
-    body: "A scoring function weighs price, deposit and delivery before ranking every final offer, so the strongest deal wins.",
+    body: "Final offers are scored on price, deposit and delivery.",
   },
   {
     title: "Settle through PayPal",
-    body: "The full amount is authorized, the negotiated deposit is captured, and the balance is captured once delivery is confirmed.",
+    body: "The full amount is authorized; the deposit is captured up front and the balance on delivery.",
   },
 ];
 
@@ -51,37 +51,37 @@ const FEATURES: Feature[] = [
   {
     href: "/trading-floor",
     title: "Trading Floor",
-    body: "Run a negotiation and watch every seller respond round by round: live offers, seller status, and the deal the buyer agent accepts.",
+    body: "Watch every seller respond round by round, and the deal the buyer agent accepts.",
     cta: "Open the floor",
     icon: Handshake,
   },
   {
     href: "/policy",
     title: "Seller Policy",
-    body: "Describe your pricing rules in plain English. They compile into a structured policy and become a seller agent that competes in the market.",
+    body: "Turn plain-English pricing rules into a seller agent that competes in the market.",
     cta: "Write a policy",
     icon: ScrollText,
   },
   {
     href: "/benchmark",
     title: "Benchmark",
-    body: "Fixed-seed purchases from data/benchmark.json, checked against each buyer's budget, the winning seller's price floor and the delivery deadline.",
+    body: "Fixed-seed runs checked against budget, price floor and delivery deadline.",
     cta: "See the scenarios",
     icon: TrendingUp,
   },
   {
     href: "/receipt",
     title: "Deal & receipt",
-    body: "The agreed price, deposit and balance — with each deal status from negotiated through deposit paid to complete.",
+    body: "Agreed terms, deposit, balance and payment status.",
     cta: "View settlement",
     icon: ReceiptText,
   },
 ];
 
 const GUARDS = [
-  "A seller offer below that seller's price floor is rejected and corrected before it reaches the floor.",
-  "A buyer acceptance above the budget, or before the target price while there is still time to negotiate, is blocked.",
-  "The agent may only quote competing prices that another seller actually offered. Invented numbers are rewritten.",
+  "A seller offer below its price floor is rejected and corrected.",
+  "An acceptance above budget, or above target while rounds remain, is blocked.",
+  "Competing prices must come from another seller's real offer.",
   "A seller cannot promise a delivery time it cannot meet.",
 ];
 
@@ -109,10 +109,9 @@ export default function OverviewPage() {
               Let an AI buyer haggle with every seller at once.
             </h1>
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted sm:text-[15px]">
-              You set one mandate — what you want, your budget and your target price. A buyer
-              agent then negotiates price, deposit and delivery with several seller agents in
-              parallel, uses their competing offers as leverage, and settles the winning deal
-              through PayPal.
+              Set one mandate — item, budget, target price. A buyer agent negotiates
+              price, deposit and delivery with several sellers at once, then settles
+              the winning deal through PayPal.
             </p>
             <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
               <ButtonLink href="/trading-floor">Open Trading Floor</ButtonLink>
@@ -122,9 +121,6 @@ export default function OverviewPage() {
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <SandboxBadge />
-              <span className="text-xs text-muted">
-                Payments never touch real money.
-              </span>
             </div>
           </div>
 
@@ -155,7 +151,7 @@ export default function OverviewPage() {
               />
             </dl>
             <p className="mt-4 border-t border-line pt-3 text-[11px] leading-relaxed text-muted">
-              The defaults the backend applies when no mandate is supplied.
+              Backend defaults.
             </p>
           </div>
         </div>
@@ -170,9 +166,6 @@ export default function OverviewPage() {
           >
             How a negotiation runs
           </h2>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            Four stages, streamed to the Trading Floor as they happen.
-          </p>
         </div>
 
         <ol className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -200,9 +193,6 @@ export default function OverviewPage() {
           >
             Explore the workspace
           </h2>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            Every screen runs against the same negotiation engine.
-          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -249,11 +239,6 @@ export default function OverviewPage() {
         >
           The model writes, code decides
         </h2>
-        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">
-          Language models handle the conversation. Every rule that protects you is
-          enforced in code.
-        </p>
-
         <ul className="mt-5 grid gap-x-8 gap-y-3 sm:grid-cols-2">
           {GUARDS.map((guard) => (
             <li key={guard} className="flex gap-2.5">
@@ -271,8 +256,8 @@ export default function OverviewPage() {
             className="mt-0.5 size-4 shrink-0 text-success"
             aria-hidden="true"
           />
-          The winning deal is stored on the server, so a browser cannot send a
-          different price to PayPal.
+          The winning deal is stored server-side, so PayPal receives the agreed
+          price.
         </p>
       </section>
 
@@ -288,11 +273,9 @@ export default function OverviewPage() {
           Where things stand
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          The Trading Floor is the working end-to-end path today. The Seller Policy,
-          Benchmark and Deal screens are still being assembled and their links lead to
-          annotated scaffolds. Default sellers are simulated, live negotiations fall
-          back to a recorded replay when the model is unavailable, and deals live in
-          server memory — a restart clears them.
+          Negotiations run live from backend events, with a recorded replay
+          fallback. Benchmark results are recorded, and deals and compiled policies
+          live in server memory — a restart clears them.
         </p>
       </section>
     </div>

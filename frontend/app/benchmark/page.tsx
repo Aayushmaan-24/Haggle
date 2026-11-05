@@ -73,49 +73,49 @@ const pct = (value: number) => `${value.toFixed(1)}%`;
 const CHECKS = [
   {
     title: "Within budget",
-    body: "The winning price must not exceed the buyer's budget. An acceptance above it is blocked in code before the deal is recorded.",
+    body: "The winning price cannot exceed the buyer's budget.",
   },
   {
     title: "At or above the seller's floor",
-    body: "No seller is pushed below its own price floor. Any offer that tries is rejected and corrected.",
+    body: "No seller is pushed below its own price floor.",
   },
   {
     title: "Inside the delivery cap",
-    body: "The promised delivery days must not exceed the mandate's maximum, so a seller cannot claim a time it cannot meet.",
+    body: "Promised delivery days cannot exceed the mandate's maximum.",
   },
 ];
 
 const METHOD = [
-  "Seller catalogs are rescaled by 0.5×, 1×, 2×, 5× or 10×, with each list price and floor jittered slightly around the original.",
-  "Budgets are set at 85%, 90% or 95% of the average seller list price; the target price is 94% of the budget.",
-  "A fixed random seed (42) makes the scenario sequence reproducible from run to run.",
-  "Runs are spaced five seconds apart to stay under free-tier model rate limits.",
+  "Catalogs are rescaled by 0.5× to 10×, with list prices and floors jittered slightly.",
+  "Budgets are 85–95% of the average list price; the target is 94% of the budget.",
+  "Seed 42 makes the scenario sequence reproducible.",
+  "Runs are spaced five seconds apart to stay under model rate limits.",
 ];
 
 const READING = [
-  "Saving averages are computed over closed deals only — a run that ends without a deal counts toward the deal rate, not the savings.",
-  "\"Versus list\" compares the winning price with that seller's own list price; \"versus cheapest\" compares it with the lowest list price on the floor.",
-  "Model output varies between live runs, so these figures describe this agent on these simulated scenarios, not a market-wide claim.",
-  "The snapshot is baked in at build time. Regenerate data/benchmark.json and rebuild the frontend to update this page.",
+  "Saving averages cover closed deals only.",
+  "“Versus list” compares with the winner's own list price; “versus cheapest” with the lowest list price on the floor.",
+  "Model output varies, so these figures describe this agent on these scenarios only.",
+  "The snapshot is baked in at build time; regenerate it and rebuild to update.",
 ];
 
 const NEXT_LINKS = [
   {
     href: "/trading-floor",
     label: "Trading Floor",
-    body: "Watch a negotiation stream live.",
+    body: "Watch a negotiation live.",
     icon: Handshake,
   },
   {
     href: "/policy",
     label: "Seller Policy",
-    body: "Compile plain-English selling rules.",
+    body: "Compile selling rules.",
     icon: ScrollText,
   },
   {
     href: "/",
     label: "Overview",
-    body: "How the whole flow fits together.",
+    body: "How the flow fits together.",
     icon: LayoutDashboard,
   },
 ];
@@ -134,7 +134,7 @@ export default function BenchmarkPage() {
       <PageHeader
         eyebrow="Performance"
         title="Benchmark"
-        description="Randomized purchases with a fixed seed, each checked against the buyer's budget, the winning seller's price floor and the delivery deadline."
+        description="Fixed-seed purchases checked against budget, price floor and delivery deadline."
         actions={<ButtonLink href="/trading-floor">Open Trading Floor</ButtonLink>}
       />
 
@@ -148,17 +148,13 @@ export default function BenchmarkPage() {
           </span>
           <p className="text-sm leading-relaxed text-muted">
             <span id="snapshot-heading" className="font-medium text-ink">
-              These are recorded results, not live ones.
+              Recorded results, not live runs.
             </span>{" "}
-            The backend exposes no benchmark endpoint, so this page reads{" "}
+            Read from{" "}
             <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-lavender">
               data/benchmark.json
             </code>{" "}
-            when the site is built. The data is produced by{" "}
-            <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-lavender">
-              backend/benchmark.py
-            </code>
-            .
+            at build time.
           </p>
         </div>
       </section>
@@ -166,36 +162,32 @@ export default function BenchmarkPage() {
       {hasData && summary ? (
         <>
           <section aria-labelledby="summary-heading" className="space-y-3">
-            <SectionHeading
-              id="summary-heading"
-              title="Summary"
-              description={`Across ${summary.runs} recorded ${summary.runs === 1 ? "run" : "runs"}.`}
-            />
+            <SectionHeading id="summary-heading" title="Summary" />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               <Stat
                 label="Completed runs"
                 value={String(summary.runs)}
-                hint="Scenarios recorded in the snapshot."
+                hint="Scenarios in this snapshot."
               />
               <Stat
                 label="Deal rate"
                 value={pct(summary.deal_rate_pct)}
-                hint="Runs that closed a deal inside the mandate."
+                hint="Runs that closed a deal."
               />
               <Stat
                 label="Avg. saving vs list"
                 value={pct(summary.avg_saving_vs_list_pct)}
-                hint="Winning price against the winner's own list price."
+                hint="Against the winner's list price."
               />
               <Stat
                 label="Avg. saving vs cheapest"
                 value={pct(summary.avg_saving_vs_cheapest_list_pct)}
-                hint="Winning price against the lowest list price on the floor."
+                hint="Against the lowest list price."
               />
               <Stat
                 label="Guard violations"
                 value={String(summary.guard_violations)}
-                hint="Winning deals that broke budget, floor or delivery."
+                hint="Deals that broke a check."
                 tone={summary.guard_violations === 0 ? "positive" : "negative"}
               />
             </div>
@@ -205,7 +197,6 @@ export default function BenchmarkPage() {
             <SectionHeading
               id="checks-heading"
               title="What every winning deal is checked against"
-              description="Three hard constraints are enforced in code, not by the model."
             />
             <div className="grid gap-3 sm:grid-cols-3">
               {CHECKS.map((check) => (
@@ -233,15 +224,13 @@ export default function BenchmarkPage() {
                 <span className="inline-flex items-center gap-1.5 text-success">
                   <Check className="size-3.5" aria-hidden="true" />
                   All {closedDeals.length} closed{" "}
-                  {closedDeals.length === 1 ? "deal" : "deals"} passed every
-                  check in this snapshot.
+                  {closedDeals.length === 1 ? "deal" : "deals"} passed every check.
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-warning">
                   <CircleSlash className="size-3.5" aria-hidden="true" />
                   {failedGuards.length} of {closedDeals.length} closed{" "}
-                  {closedDeals.length === 1 ? "deal" : "deals"} failed a check in
-                  this snapshot.
+                  {closedDeals.length === 1 ? "deal" : "deals"} failed a check.
                 </span>
               )}
             </p>
@@ -251,7 +240,7 @@ export default function BenchmarkPage() {
             <SectionHeading
               id="scenarios-heading"
               title="Recorded scenarios"
-              description="Listed in the order they were run. Prices are in US dollars."
+              description="In run order, in US dollars."
             />
 
             <div className="overflow-hidden rounded-panel border border-line bg-surface">
@@ -384,11 +373,7 @@ export default function BenchmarkPage() {
           </section>
 
           <section aria-labelledby="method-heading" className="space-y-3">
-            <SectionHeading
-              id="method-heading"
-              title="Method and caveats"
-              description="What the script does, and what these numbers can and cannot tell you."
-            />
+            <SectionHeading id="method-heading" title="Method and caveats" />
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="rounded-panel border border-line bg-surface p-5">
                 <h3 className="text-sm font-semibold text-ink">
@@ -408,7 +393,7 @@ export default function BenchmarkPage() {
       ) : (
         <EmptyState
           title="No benchmark runs recorded"
-          description="The benchmark snapshot does not contain a completed run yet. Generate one locally, then rebuild the frontend to publish the figures here."
+          description="Generate a snapshot, then rebuild the frontend to publish it here."
           action={
             <code className="rounded-md border border-line bg-surface-2 px-3 py-1.5 font-mono text-[12px] text-lavender">
               python benchmark.py 10
@@ -466,7 +451,7 @@ function SectionHeading({
 }: {
   id: string;
   title: string;
-  description: string;
+  description?: string;
 }) {
   return (
     <div className="space-y-1">
@@ -476,9 +461,11 @@ function SectionHeading({
       >
         {title}
       </h2>
-      <p className="max-w-2xl text-sm leading-relaxed text-muted">
-        {description}
-      </p>
+      {description ? (
+        <p className="max-w-2xl text-sm leading-relaxed text-muted">
+          {description}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -31,23 +31,21 @@ const usd = new Intl.NumberFormat("en-US", {
 const STATUS_COPY: Record<DealStatus, { headline: string; detail: string }> = {
   negotiated: {
     headline: "Terms agreed, payment not started",
-    detail:
-      "This deal is stored and its terms are final, but no PayPal order exists yet. No authorization or capture is recorded for it.",
+    detail: "Terms are final, but no PayPal order exists yet.",
   },
   awaiting_approval: {
     headline: "Waiting for PayPal approval",
     detail:
-      "A PayPal order for the full amount has been created and the buyer was sent to approve it. No authorization or capture is recorded for the deal yet.",
+      "A PayPal order for the full amount was created and awaits buyer approval.",
   },
   deposit_paid: {
     headline: "Deposit captured, balance pending",
     detail:
-      "PayPal authorized the full amount and captured the deposit. The balance is released once delivery is confirmed.",
+      "The full amount is authorized and the deposit captured. The balance follows delivery.",
   },
   complete: {
     headline: "Payment complete",
-    detail:
-      "The deposit and any remaining balance have been captured for this deal.",
+    detail: "Deposit and balance are fully captured.",
   },
 };
 
@@ -77,19 +75,19 @@ const NEXT_LINKS: Array<{
   {
     href: "/trading-floor",
     label: "Trading Floor",
-    body: "Run a negotiation and open the next deal.",
+    body: "Run a negotiation.",
     icon: Handshake,
   },
   {
     href: "/",
     label: "Overview",
-    body: "How the mandate, negotiation and settlement fit together.",
+    body: "How the flow fits together.",
     icon: LayoutDashboard,
   },
   {
     href: "/benchmark",
     label: "Benchmark",
-    body: "Recorded runs and their guard results.",
+    body: "Recorded runs and guards.",
     icon: TrendingUp,
   },
 ];
@@ -140,8 +138,7 @@ function authorizationStep(status: DealStatus | null): PaymentStep {
       title,
       state: "Not available",
       tone: "idle",
-      detail:
-        "The deal status is not recognised, so no authorization state is assumed.",
+      detail: "Deal status not recognised.",
     };
   }
 
@@ -151,7 +148,7 @@ function authorizationStep(status: DealStatus | null): PaymentStep {
       title,
       state: "Not started",
       tone: "idle",
-      detail: "No PayPal order has been created for this deal yet.",
+      detail: "No PayPal order yet.",
     };
   }
 
@@ -161,8 +158,7 @@ function authorizationStep(status: DealStatus | null): PaymentStep {
       title,
       state: "Awaiting approval",
       tone: "pending",
-      detail:
-        "The PayPal order exists for the full amount, but no authorization is recorded for this deal yet.",
+      detail: "Order created; not authorized yet.",
     };
   }
 
@@ -171,7 +167,7 @@ function authorizationStep(status: DealStatus | null): PaymentStep {
     title,
     state: "Authorized",
     tone: "done",
-    detail: "The full amount was authorized before the deposit was captured.",
+    detail: "Authorized before the deposit was captured.",
   };
 }
 
@@ -190,7 +186,7 @@ function depositStep(
       title,
       state: "No deposit due",
       tone: "idle",
-      detail: "The stored deposit is zero, so nothing is captured up front.",
+      detail: "Deposit is zero; nothing captured up front.",
     };
   }
 
@@ -200,8 +196,7 @@ function depositStep(
       title,
       state: "Not available",
       tone: "idle",
-      detail:
-        "The deal status is not recognised, so the deposit state cannot be determined.",
+      detail: "Deal status not recognised.",
     };
   }
 
@@ -211,7 +206,7 @@ function depositStep(
       title,
       state: "Captured",
       tone: "done",
-      detail: "PayPal captured the deposit after the order was approved.",
+      detail: "Captured after the order was approved.",
     };
   }
 
@@ -221,8 +216,7 @@ function depositStep(
       title,
       state: "Not captured yet",
       tone: "pending",
-      detail:
-        "The deposit is captured only after the buyer approves the full amount in PayPal.",
+      detail: "Captured after the buyer approves in PayPal.",
     };
   }
 
@@ -231,7 +225,7 @@ function depositStep(
     title,
     state: "Not captured",
     tone: "idle",
-    detail: "Nothing is captured until the PayPal order is created and approved.",
+    detail: "Nothing is captured until the order is approved.",
   };
 }
 
@@ -247,8 +241,7 @@ function balanceStep(
       title,
       state: "No balance due",
       tone: "idle",
-      detail:
-        "The deposit covers the full amount, so there is no balance to release.",
+      detail: "The deposit covers the full amount.",
     };
   }
 
@@ -258,8 +251,7 @@ function balanceStep(
       title,
       state: "Not available",
       tone: "idle",
-      detail:
-        "The deal status is not recognised, so the balance state cannot be determined.",
+      detail: "Deal status not recognised.",
     };
   }
 
@@ -269,8 +261,7 @@ function balanceStep(
       title,
       state: "Captured",
       tone: "done",
-      detail:
-        "PayPal captured the balance after delivery was confirmed and the deal completed.",
+      detail: "Captured after delivery was confirmed.",
     };
   }
 
@@ -280,8 +271,7 @@ function balanceStep(
       title,
       state: "Pending delivery",
       tone: "pending",
-      detail:
-        "The balance is still held in the authorization. It is captured when delivery is confirmed.",
+      detail: "Held in the authorization until delivery is confirmed.",
     };
   }
 
@@ -291,8 +281,7 @@ function balanceStep(
       title,
       state: "Not captured yet",
       tone: "pending",
-      detail:
-        "The balance is captured only after the deposit is taken and delivery is confirmed.",
+      detail: "Captured after the deposit and delivery.",
     };
   }
 
@@ -301,8 +290,7 @@ function balanceStep(
     title,
     state: "Not captured",
     tone: "idle",
-    detail:
-      "Nothing is captured until the order is approved and the deposit is taken.",
+    detail: "Nothing is captured until the order is approved and the deposit taken.",
   };
 }
 
@@ -316,7 +304,7 @@ export default function ReceiptPage() {
       <PageHeader
         eyebrow="Settlement"
         title="Deal receipt"
-        description="The agreed terms and the PayPal payment split for a stored deal. Payment state comes from the deal's own status, and any action here calls the backend's existing PayPal endpoints and waits for the server response."
+        description="Agreed terms and the PayPal payment split for a stored deal. Payment state comes from the deal's own status."
         actions={
           <ButtonLink href="/trading-floor" variant="secondary">
             Back to Trading Floor
@@ -429,13 +417,7 @@ function LoadingPanel({ dealId }: { dealId: string | null }) {
       <h2 id="loading-heading" className="text-lg font-semibold text-ink">
         Loading deal
       </h2>
-      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
-        Fetching the receipt from the backend&apos;s deal endpoint.
-      </p>
-      <LoadingState
-        variant="pulse"
-        description="Reading the stored deal and its payment status…"
-      />
+      <LoadingState variant="pulse" description="Reading the stored deal…" />
       <p role="status" className="sr-only">
         {dealId
           ? `Loading the receipt for deal ${dealId}.`
@@ -461,15 +443,11 @@ function MissingIdState() {
         No deal ID in this link
       </h2>
       <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-        A receipt opens as{" "}
+        Receipts open as{" "}
         <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-lavender">
           /receipt?deal=&lt;id&gt;
         </code>
-        . Without an ID there is no stored deal to look up.
-      </p>
-      <p className="mx-auto mt-2 max-w-md text-[12px] leading-relaxed text-muted">
-        The backend adds the deal ID itself when PayPal redirects here, so a
-        normal arrival always carries one.
+        . PayPal adds the ID on redirect.
       </p>
       <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
         <ButtonLink href="/trading-floor">Open Trading Floor</ButtonLink>
@@ -505,9 +483,8 @@ function UnknownDealState({
             No deal found for this ID
           </h2>
           <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted">
-            The deal endpoint returned 404. Deals live in server memory only, so
-            a backend restart clears them, and an ID from another deployment will
-            not resolve here.
+            The deal endpoint returned 404. Deals live in server memory, so a
+            restart clears them.
           </p>
           <p className="mt-3 text-[12px] text-muted">
             Requested deal ID{" "}
@@ -628,13 +605,13 @@ function DealReceipt({
     allAmountsKnown && Math.abs((total ?? 0) - (deposit ?? 0) - (balance ?? 0)) < 0.011;
 
   let consistencyNote =
-    "Deposit and balance add up to the agreed total. The figures are stored on the server, not calculated by this page.";
+    "Deposit and balance add up to the agreed total.";
   if (!allAmountsKnown) {
     consistencyNote =
-      "One or more amounts were not included in the deal response, so the split cannot be checked here.";
+      "Amounts are missing, so the split cannot be checked.";
   } else if (!breakdownAddsUp) {
     consistencyNote =
-      "The stored deposit and balance do not add up to the stored total. The figures are shown unchanged rather than corrected.";
+      "Deposit and balance do not add up to the stored total; figures are shown unchanged.";
   }
 
   const steps: PaymentStep[] = [
@@ -737,9 +714,8 @@ function DealReceipt({
             {knownStatus === "negotiated" ? (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="max-w-xl text-[12px] leading-relaxed text-muted">
-                  Starting settlement creates a sandbox PayPal order for the full
-                  amount. After approval, PayPal authorizes it and captures the
-                  deposit.
+                  Creates a sandbox PayPal order for the full amount. Approval
+                  authorizes payment and captures the deposit.
                 </p>
                 <Button
                   variant="paypal"
@@ -757,9 +733,8 @@ function DealReceipt({
             {knownStatus === "deposit_paid" ? (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="max-w-xl text-[12px] leading-relaxed text-muted">
-                  Confirming delivery captures the remaining balance through
-                  PayPal. The backend accepts this only while the deal is deposit
-                  paid.
+                  Captures the remaining balance. Allowed only while the deal is
+                  deposit paid.
                 </p>
                 <Button
                   variant="secondary"
@@ -776,15 +751,14 @@ function DealReceipt({
 
             {knownStatus === "awaiting_approval" ? (
               <p className="max-w-2xl text-[12px] leading-relaxed text-muted">
-                Complete the approval in the PayPal window. The backend stores the
-                order, but not the approval link, so this page cannot reopen it.
+                Finish the approval in the PayPal window. The approval link is not
+                stored, so it cannot be reopened here.
               </p>
             ) : null}
 
             {knownStatus === "complete" ? (
               <p className="max-w-2xl text-[12px] leading-relaxed text-muted">
-                Settlement is complete. No further payment action is available
-                for this deal.
+                No further payment action is available.
               </p>
             ) : null}
 
@@ -846,22 +820,22 @@ function DealReceipt({
           <Fact
             label="Buyer"
             value="You (buyer agent)"
-            hint="The deal record stores no buyer name, email or account."
+            hint="Not stored on the deal."
           />
           <Fact
             label="Deposit terms"
             value={depositPercent ? `${depositPercent} of the total` : null}
-            hint="Captured up front; the rest is released on delivery."
+            hint="Captured up front; the rest on delivery."
           />
           <Fact
             label="Delivery"
             value={delivery}
-            hint="The delivery window the winning seller agreed to."
+            hint="Agreed by the winning seller."
           />
           <Fact
             label="Seller list price"
             value={formatMoney(listPrice)}
-            hint="That seller's own list price before negotiation."
+            hint="Before negotiation."
             mono
           />
         </dl>
@@ -883,8 +857,7 @@ function DealReceipt({
             Payment breakdown
           </h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            Amounts come from the stored deal. The steps below report its status
-            field only; they are not a separate PayPal event log.
+            From the stored deal; the steps reflect its status field only.
           </p>
         </div>
 
@@ -892,17 +865,17 @@ function DealReceipt({
           <Amount
             label="Agreed total"
             value={formatMoney(total)}
-            hint="The full amount the payment split is based on."
+            hint="The amount being split."
           />
           <Amount
             label={depositPercent ? `Deposit (${depositPercent})` : "Deposit"}
             value={formatMoney(deposit)}
-            hint="The share captured up front, once the order is approved."
+            hint="Captured up front."
           />
           <Amount
             label="Balance"
             value={formatMoney(balance)}
-            hint="The remainder, released when delivery is confirmed."
+            hint="Released on delivery."
           />
         </dl>
 
@@ -914,8 +887,7 @@ function DealReceipt({
           Settlement steps
         </h3>
         <p className="mt-1 text-[12px] leading-relaxed text-muted">
-          Each state is derived from the deal status. A step that has not
-          happened yet is labelled as pending, not as successful.
+          Derived from the deal status.
         </p>
 
         <ol className="mt-3 divide-y divide-line/70">
@@ -954,9 +926,7 @@ function DealReceipt({
             Payment references
           </h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted">
-            The deal endpoint returns an allow-listed set of fields. Transaction
-            identifiers are not part of that response, so none are displayed
-            here.
+            Transaction identifiers are not part of the deal response.
           </p>
         </div>
 
@@ -971,9 +941,9 @@ function DealReceipt({
               <ReferenceRow label="Capture references" value="Not stored" />
             </dl>
             <p className="mt-4 text-[12px] leading-relaxed text-muted">
-              The backend keeps the order and authorization IDs in server memory,
-              but <span className="font-mono">GET /api/deals/&lt;id&gt;</span>{" "}
-              omits them. Capture IDs are not stored at all.
+              Kept in server memory, but omitted by{" "}
+              <span className="font-mono">GET /api/deals/&lt;id&gt;</span>. Capture IDs
+              are not stored.
             </p>
           </div>
 
@@ -983,10 +953,10 @@ function DealReceipt({
             </h3>
             <ul className="mt-3 space-y-2.5">
               {[
-                "Refunds: the backend has no refund endpoint or refund status, so no refund is shown.",
-                "Timestamps: the deal record has no created, authorized or captured times.",
-                "Fees and taxes: the stored figures are one total split into deposit and balance.",
-                "Buyer identity: no buyer name, email or PayPal account is stored on the deal.",
+                "Refunds: no refund endpoint or status.",
+                "Timestamps: no created, authorized or captured times.",
+                "Fees and taxes: one total, split into deposit and balance.",
+                "Buyer identity: no name, email or account.",
               ].map((entry) => (
                 <li key={entry} className="flex gap-2.5">
                   <span

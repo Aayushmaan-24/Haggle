@@ -6,8 +6,7 @@ export default function NotFound() {
       <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-faint">404</p>
       <h1 className="mt-3 text-2xl font-semibold tracking-[-0.01em] text-ink">Page not found</h1>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted">
-        This route does not exist. Negotiations, policies and deals are all reached from the
-        workspace.
+        This page does not exist.
       </p>
       <ButtonLink href="/" className="mt-6">
         Back to Overview
