@@ -32,10 +32,8 @@ export interface SseMessage {
 /**
  * Split a raw text chunk into complete SSE events.
  *
- * Any buffer state is carried by `SlidingWindow` so a chunk that ends in the
- * middle of `data: ...` never loses bytes. Events that touch `\r` are kept
- * because the back-end normalizes `\n` only (or leaves `\r\n` in place) and
- * real browsers emit `\n`.
+ * The buffer is carried across `append`/`consume` calls so a chunk that ends in
+ * the middle of `data: ...` never loses bytes.
  */
 /* Re-exported for testing. */
 export class SlidingWindow {
@@ -47,7 +45,7 @@ export class SlidingWindow {
     return this.buf;
   }
 
-  /** Consume and return all complete events; leave the tail on the next call. */
+  /** Return the next complete event (or `""`), leaving the tail buffered. */
   consume(): string {
     const idx = this.buf.indexOf("\n\n");
     if (idx === -1) return "";
@@ -156,7 +154,6 @@ export function decodeEvent(raw: string): SseMessage {
   return { ok: true, event: { type: "unknown", raw: text } };
 }
 
-/** Extract the `data:` payload of a single complete SSE event. */
 function num(v: unknown): number {
   return typeof v === "number" ? v : 0;
 }
@@ -222,10 +219,10 @@ export function decodeFirstEvent(raw: string): { message: SseMessage; remaining:
  * Stream reader. Keeps a `SlidingWindow` buffer across `read()` calls so a
  * chunk that splits an event is reassembled transparently.
  */
-/* Re-exported for testing. */
 export class SseReader {
   private readonly setState: (message: SseMessage) => void;
   private readonly onAbort: () => void;
+  private readonly onFinish: ((error: Error | null) => void) | undefined;
   private closed = false;
 
   constructor(
@@ -233,55 +230,66 @@ export class SseReader {
     private readonly reader: ReadableStreamDefaultReader<Uint8Array>,
     setState: (message: SseMessage) => void,
     onAbort: () => void,
+    onFinish?: (error: Error | null) => void,
   ) {
     this.setState = setState;
     this.onAbort = onAbort;
+    this.onFinish = onFinish;
   }
 
   async run(): Promise<void> {
     const window = new SlidingWindow();
+    const decoder = new TextDecoder();
+    let failure: Error | null = null;
 
-    while (true) {
-      // Abort takes priority: stop consuming, release the reader, report.
-      if (this.closed) {
-        break;
+    try {
+      while (true) {
+        // Abort takes priority: stop consuming and release the reader.
+        if (this.closed) return;
+        const { done, value } = await this.reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        // `stream: true` keeps multi-byte characters intact across chunk splits.
+        window.append(decoder.decode(value, { stream: true }));
+
+        let event = window.consume();
+        while (event !== "") {
+          this.setState(decodeEvent(event));
+          event = window.consume();
+        }
       }
 
-      const { done, value } = await this.reader.read();
-      if (done) break;
-
-      const text = new TextDecoder().decode(value);
-      window.append(text);
-
-      let event = window.consume();
-      while (event !== "") {
-        this.setState(decodeEvent(event));
-        event = window.consume();
+      // Flush any pending decoder state, then decode a trailing partial event:
+      // a remote that drops the connection mid-event must not leave bytes behind.
+      window.append(decoder.decode());
+      const trailing = window.consume();
+      if (trailing !== "") this.setState(decodeEvent(trailing));
+    } catch (error) {
+      if (!this.closed) failure = error instanceof Error ? error : new Error(String(error));
+    } finally {
+      try {
+        this.reader.releaseLock();
+      } catch {
+        // Already released/cancelled; nothing to do.
       }
-
-      // `event` is the unfinished tail: keep it for the next `read()` call.
     }
 
-    // Stream ended cleanly. If a trailing partial event remains, decode it
-    // anyway — a remote that drops the connection mid-event must not leave
-    // bytes on the table.
-    const trailing = window.consume();
-    if (trailing !== "") {
-      this.setState(decodeEvent(trailing));
-    }
-
-    this.reader.releaseLock();
+    // An explicit abort is reported through `onAbort`; only natural completion
+    // (or a read failure) reaches `onFinish`.
+    if (!this.closed) this.onFinish?.(failure);
   }
 
   abort(): void {
+    if (this.closed) return;
     this.closed = true;
-    this.reader.cancel().catch(() => undefined);
+    void this.reader.cancel().catch(() => undefined);
     this.onAbort();
   }
 }
 
-/** Turn a fetch `Response` into a `ReadableStream` of UTF-8 text. */
-function toTextStream(response: Response): ReadableStream<Uint8Array> {
+/** Turn a fetch `Response` into a `ReadableStream` of UTF-8 bytes. */
+function toByteStream(response: Response): ReadableStream<Uint8Array> {
   if (!response.body) {
     return new ReadableStream<Uint8Array>({
       start() {},
@@ -295,12 +303,16 @@ function toTextStream(response: Response): ReadableStream<Uint8Array> {
  * Open the negotiation stream. Returns the reader handle so the caller can
  * stop it later with `reader.abort()` (Stop listening only — it does not
  * cancel the backend negotiation).
+ *
+ * `onFinish` receives `null` when the stream ends on its own (the normal path,
+ * including after a `result` event) and an `Error` when reading fails.
  */
 /* Re-exported for testing. */
 export async function openNegotiationStream(
   url: string,
   onMessage: (message: SseMessage) => void,
   onAbort: () => void,
+  onFinish?: (error: Error | null) => void,
 ): Promise<SseReader> {
   const controller = new AbortController();
   const response = await fetch(url, {
@@ -318,13 +330,19 @@ export async function openNegotiationStream(
     throw new Error(message);
   }
 
-  const stream = toTextStream(response);
+  const stream = toByteStream(response);
 
   // `response.body` can only be read once. If the caller cancels before we
   // consume it, the stream is already closed.
   const reader = stream.getReader();
 
-  return new SseReader(stream, reader, onMessage, onAbort);
+  const sseReader = new SseReader(stream, reader, onMessage, onAbort, onFinish);
+
+  // Consume the body immediately so events reach `onMessage` while the caller
+  // still holds the reader handle.
+  void sseReader.run().catch(() => undefined);
+
+  return sseReader;
 }
 
 /* Re-exported for testing. */

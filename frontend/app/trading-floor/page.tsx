@@ -315,6 +315,7 @@ export default function TradingFloorPage() {
   const isRoundCompleted = (round: number) =>
     Boolean(state.result) ||
     state.connectionStatus === "closed" ||
+    state.connectionStatus === "completed" ||
     round < currentRound;
 
   const outcome: Outcome = state.result
@@ -615,6 +616,7 @@ export default function TradingFloorPage() {
                   className={cn(
                     "size-2 rounded-full",
                     state.connectionStatus === "open" && "bg-success",
+                    state.connectionStatus === "completed" && "bg-success",
                     state.connectionStatus === "connecting" && "bg-warning",
                     state.connectionStatus === "closed" && "bg-faint",
                     state.connectionStatus === "error" && "bg-danger",
@@ -624,13 +626,15 @@ export default function TradingFloorPage() {
                 />
                 {state.connectionStatus === "open"
                   ? "Listening"
-                  : state.connectionStatus === "connecting"
-                    ? "Connecting…"
-                    : state.connectionStatus === "closed"
-                      ? "Stopped listening"
-                      : state.connectionStatus === "error"
-                        ? "Error"
-                        : "Idle"}
+                  : state.connectionStatus === "completed"
+                    ? "Completed"
+                    : state.connectionStatus === "connecting"
+                      ? "Connecting…"
+                      : state.connectionStatus === "closed"
+                        ? "Stopped listening"
+                        : state.connectionStatus === "error"
+                          ? "Error"
+                          : "Idle"}
               </span>
               <span className="text-sm text-muted">
                 Round <span className="font-mono text-ink">{state.currentRound}</span>

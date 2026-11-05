@@ -70,67 +70,72 @@ export interface NegotiationState {
     | null;
   loading: boolean;
   error: string | null;
-  connectionStatus: "idle" | "connecting" | "open" | "closed" | "error";
+  connectionStatus: "idle" | "connecting" | "open" | "completed" | "closed" | "error";
 }
 
+const EMPTY_STATE: NegotiationState = {
+  events: [],
+  currentRound: 0,
+  sellerStatuses: {},
+  offers: [],
+  result: null,
+  deal: null,
+  loading: false,
+  error: null,
+  connectionStatus: "idle",
+};
+
 export function useNegotiation(): [NegotiationState, NegotiationControl] {
-  const [state, setState] = useState<NegotiationState>({
-    events: [],
-    currentRound: 0,
-    sellerStatuses: {},
-    offers: [],
-    result: null,
-    deal: null,
-    loading: false,
-    error: null,
-    connectionStatus: "idle",
-  });
+  const [state, setState] = useState<NegotiationState>(EMPTY_STATE);
 
   // Single-source-of-truth for the stream lifecycle.
-  const streamRef = useRef<{ reader: { abort: () => void } | null; socket: unknown } | null>(null);
+  const streamRef = useRef<{ reader: { abort: () => void } | null } | null>(null);
+
+  // True while a negotiation is connecting/open. Guards against duplicate
+  // connections; cleared on completion, abort or failure.
+  const activeRef = useRef(false);
+
+  // Monotonic token. Callbacks from a previous negotiation compare against it
+  // and drop themselves so stale streams cannot overwrite fresh state.
+  const generationRef = useRef(0);
 
   // So the same result never triggers a second hydration call.
   const hydratedRef = useRef<Set<string>>(new Set());
 
-  // `result` is mutated in place and the component re-renders once per message;
-  // keep a separate reference for the disposer.
-  const resultRef = useRef<{
-    ranking: Array<{ seller: string; price: number; deposit_percent: number; delivery_days: number; score: number }>;
-    winner: { seller: string; price: number; deposit_percent: number; delivery_days: number; score: number } | null;
-    list_price: number | null;
-    deal_id?: string;
-  } | null>(null);
-
   const resetState = useCallback(() => {
+    // Invalidate every callback belonging to the previous negotiation.
+    generationRef.current += 1;
+    activeRef.current = false;
+
+    // Tear down any live reader so a new negotiation actually opens a fresh
+    // stream instead of reusing the previous one.
+    const handle = streamRef.current;
+    streamRef.current = null;
+    if (handle?.reader) handle.reader.abort();
+
     hydratedRef.current.clear();
-    resultRef.current = null;
-    setState((s) => ({
-      ...s,
-      events: [],
-      currentRound: 0,
-      sellerStatuses: {},
-      offers: [],
-      result: null,
-      deal: null,
-      loading: false,
-      error: null,
-      connectionStatus: "idle",
-    }));
+    setState({ ...EMPTY_STATE });
   }, []);
 
   // Start the negotiation. One active stream per instance at a time.
   const startNegotiation = useCallback(
     async (params: NegotiateParams) => {
-      // Repeated start attempts while one is already open: silently reuse, do not
+      // Repeated start attempts while one is already open: ignore, do not
       // spawn a second backend negotiation.
-      if (streamRef.current) return;
+      if (activeRef.current) return;
 
+      // Replay Mode (and live) must start from a clean slate: no carried-over
+      // offers, statuses or results from a previous run.
       resetState();
-      setState((s) => ({ ...s, loading: true, connectionStatus: "connecting" }));
+      activeRef.current = true;
+      const generation = generationRef.current;
+
+      setState((s) => ({ ...s, loading: true, connectionStatus: "connecting", error: null }));
 
       const url = negotiateUrl(params);
 
       const onMessage = (message: SseMessage): void => {
+        if (generationRef.current !== generation) return;
         if (!message.ok) return;
         const event = message.event;
 
@@ -148,24 +153,26 @@ export function useNegotiation(): [NegotiationState, NegotiationControl] {
             case "offer":
               offers = [...offers, event];
               break;
-            case "status": {
-              const { seller, status } = event;
-              sellerStatuses = { ...sellerStatuses, [seller]: status };
+            case "status":
+              sellerStatuses = { ...sellerStatuses, [event.seller]: event.status };
               break;
-            }
             case "result": {
               result = event;
               // Hydrate only once per result payload.
               if (event.deal_id && !hydratedRef.current.has(event.deal_id)) {
                 hydratedRef.current.add(event.deal_id);
-                getDeal(event.deal_id)
-                  .then((deal) => setState((s2) => ({ ...s2, deal })))
-                  .catch((fetchError) => {
+                const dealId = event.deal_id;
+                getDeal(dealId)
+                  .then((deal) => {
+                    if (generationRef.current !== generation) return;
+                    setState((s2) => ({ ...s2, deal }));
+                  })
+                  .catch((fetchError: Error) => {
+                    if (generationRef.current !== generation) return;
                     // Deal fetch failures do not kill the stream.
                     setState((s2) => ({
                       ...s2,
                       error: `Failed to load deal details: ${fetchError.message}`,
-                      connectionStatus: "error",
                     }));
                   });
               }
@@ -189,21 +196,55 @@ export function useNegotiation(): [NegotiationState, NegotiationControl] {
             offers,
             result,
             loading: false,
-            error: s.error,
             connectionStatus: "open",
           };
         });
       };
 
       const onAbort = () => {
+        if (generationRef.current !== generation) return;
+        // The stream reader was dropped on purpose. Stop treating this
+        // negotiation as live so a later start opens a fresh stream.
+        activeRef.current = false;
+        streamRef.current = null;
         setState((s) => ({ ...s, connectionStatus: "closed", loading: false }));
       };
 
+      const onFinish = (error: Error | null) => {
+        if (generationRef.current !== generation) return;
+        activeRef.current = false;
+        streamRef.current = null;
+        if (error) {
+          setState((s) => ({
+            ...s,
+            loading: false,
+            error: error.message,
+            connectionStatus: "error",
+          }));
+          return;
+        }
+        // Natural end of the stream. Once the backend delivered a `result`,
+        // the negotiation is complete rather than merely closed.
+        setState((s) => ({
+          ...s,
+          loading: false,
+          connectionStatus: s.result ? "completed" : "closed",
+        }));
+      };
+
       try {
-        const reader = await openNegotiationStream(url, onMessage, onAbort);
-        streamRef.current = { reader, socket: null };
+        const reader = await openNegotiationStream(url, onMessage, onAbort, onFinish);
+        if (generationRef.current !== generation) {
+          // A newer negotiation superseded this one before it opened.
+          reader.abort();
+          return;
+        }
+        streamRef.current = { reader };
       } catch (err) {
+        if (generationRef.current !== generation) return;
         const message = err instanceof Error ? err.message : String(err);
+        activeRef.current = false;
+        streamRef.current = null;
         setState((s) => ({
           ...s,
           loading: false,
@@ -216,95 +257,27 @@ export function useNegotiation(): [NegotiationState, NegotiationControl] {
   );
 
   // Stop listening only: drop the client reader; the backend negotiation keeps
-  // running. `AbortController` is released here — the backend is not touched.
+  // running. The `AbortController` is released here — the backend is not touched.
   const stopListening = useCallback(() => {
     const handle = streamRef.current;
-    if (!handle || !handle.reader) return;
-    handle.reader.abort();
     streamRef.current = null;
+    if (handle?.reader) handle.reader.abort();
   }, []);
 
   // Exposed for testing; not part of the hook's API surface for callers.
   const abort = useCallback(() => {
     const handle = streamRef.current;
-    if (!handle || !handle.reader) return;
-    handle.reader.abort();
     streamRef.current = null;
+    if (handle?.reader) handle.reader.abort();
   }, []);
 
-  // React to a successful `result` with a `deal_id`: hydrate exactly once.
-  useEffect(() => {
-    const handle = streamRef.current;
-    if (!handle || !resultRef.current) return;
-
-    const { deal_id } = resultRef.current;
-    if (!deal_id || hydratedRef.current.has(deal_id)) return;
-
-    hydratedRef.current.add(deal_id);
-    getDeal(deal_id)
-      .then((deal) => setState((s) => ({ ...s, deal })))
-      .catch((fetchError) => {
-        // Hydration failure is independent of the negotiation stream: the log
-        // still explains the outcome, the stream keeps running.
-        setState((s) => ({
-          ...s,
-          error: `Failed to load deal details: ${fetchError.message}`,
-          connectionStatus: "error",
-        }));
-      });
-  }, []);
-
-  // A backend `result` event means the negotiation is finished; keep listening
-  // for the hydration promise to resolve.
-  useEffect(() => {
-    const handle = streamRef.current;
-    if (!handle || !handle.reader) return;
-
-    const onMessage = (message: SseMessage): void => {
-      if (!message.ok) return;
-      if (message.event.type === "result") {
-        resultRef.current = {
-          ranking: message.event.ranking,
-          winner: message.event.winner,
-          list_price: message.event.list_price,
-          deal_id: message.event.deal_id,
-        };
-      }
-    };
-
-    // Already listening? No — this effect only installs the *observer* for
-    // `result` events that arrive while the stream is open. We need the stream
-    // to deliver messages through `onMessage`; the hook's `startNegotiation`
-    // already wires `onMessage` into the reader. Reusing that channel here is
-    // the simplest way to observe `result` without a second stream.
-    // The previous `useEffect` above already handles hydration; this one keeps
-    // the hydration trigger alive for the case where `result` arrives during
-    // the same period.
-    const subscription = new EventTarget();
-    subscription.addEventListener("result", () => {}, { once: true });
-  }, []);
-
-  // Clean up the AbortController when the component unmounts.
+  // Clean up the stream when the component unmounts.
   useEffect(() => {
     return () => {
       const handle = streamRef.current;
-      if (handle && handle.reader) handle.reader.abort();
+      if (handle?.reader) handle.reader.abort();
     };
   }, []);
 
-  // Emit the shared state surface.
-  const stateSurface: NegotiationState = {
-    ...state,
-    events: state.events,
-    currentRound: state.currentRound,
-    sellerStatuses: state.sellerStatuses,
-    offers: state.offers,
-    result: state.result,
-    deal: state.deal,
-    loading: state.loading,
-    error: state.error,
-    connectionStatus: state.connectionStatus,
-  };
-
-  return [stateSurface, { startNegotiation, stopListening, abort }];
+  return [state, { startNegotiation, stopListening, abort }];
 }
