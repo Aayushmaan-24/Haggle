@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import type { SseEvent } from "@/lib/sse";
 import { useNegotiation } from "@/lib/useNegotiation";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -9,6 +10,12 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button, ButtonLink } from "@/components/ui/Button";
+import {
+  forgetPolicy,
+  setSelectedPolicyId,
+  useSavedPolicies,
+  useSelectedPolicyId,
+} from "@/lib/policyStore";
 import { cn } from "@/lib/cn";
 
 type OfferEvent = Extract<SseEvent, { type: "offer" }>;
@@ -70,6 +77,11 @@ const FIELD_CLASS =
  */
 export default function TradingFloorPage() {
   const [state, control] = useNegotiation();
+  const savedPolicies = useSavedPolicies();
+  const selectedPolicyId = useSelectedPolicyId();
+  const selectedPolicy =
+    savedPolicies.find((policy) => policy.policy_id === selectedPolicyId) ??
+    null;
 
   const [item, setItem] = useState("a 27-inch monitor");
   const [budget, setBudget] = useState("90");
@@ -82,6 +94,9 @@ export default function TradingFloorPage() {
     target?: boolean;
   }>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [attemptedPolicyId, setAttemptedPolicyId] = useState<string | null>(
+    null,
+  );
 
   const parsedBudget = Number(budget);
   const parsedTarget = Number(target);
@@ -118,17 +133,32 @@ export default function TradingFloorPage() {
     (state.connectionStatus === "error" && state.result !== null);
   const sessionActive = canStop || state.connectionStatus === "connecting";
 
+  // Replay uses the recorded run and ignores the seller roster, so a policy is
+  // only attached to live negotiations. The backend validates the ID on start.
+  const policyId = replay ? undefined : selectedPolicy?.policy_id;
+  const failedPolicy = attemptedPolicyId
+    ? (savedPolicies.find(
+        (policy) => policy.policy_id === attemptedPolicyId,
+      ) ?? null)
+    : null;
+  const policyUnavailable =
+    Boolean(failedPolicy) &&
+    state.connectionStatus === "error" &&
+    state.error?.trim().toLowerCase() === "unknown policy";
+
   const submitStart = async () => {
     setSubmitAttempted(true);
     if (!isValid || submitting || sessionActive) return;
 
     setSubmitting(true);
+    setAttemptedPolicyId(policyId ?? null);
     try {
       await control.startNegotiation({
         item: item.trim(),
         budget: parsedBudget,
         target: parsedTarget,
         replay,
+        policyId,
       });
     } finally {
       setSubmitting(false);
@@ -450,6 +480,72 @@ export default function TradingFloorPage() {
                     </p>
                   ) : null}
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="policy" className="block text-sm font-medium text-ink">
+                  Seller policy
+                </label>
+                <select
+                  id="policy"
+                  value={selectedPolicy?.policy_id ?? ""}
+                  onChange={(event) => setSelectedPolicyId(event.target.value)}
+                  disabled={replay || savedPolicies.length === 0 || sessionActive}
+                  aria-describedby="policy-help"
+                  className={cn(FIELD_CLASS, "disabled:opacity-50")}
+                >
+                  <option value="">No policy — use the default sellers</option>
+                  {savedPolicies.map((policy) => (
+                    <option key={policy.policy_id} value={policy.policy_id}>
+                      {policy.name} — ${policy.list_price.toFixed(2)} list
+                    </option>
+                  ))}
+                </select>
+                <p id="policy-help" className="text-xs leading-relaxed text-muted">
+                  {replay ? (
+                    "Replay reuses a recorded run, so a compiled policy is not used."
+                  ) : savedPolicies.length === 0 ? (
+                    <>
+                      No compiled policies are saved in this browser.{" "}
+                      <Link
+                        href="/policy"
+                        className="text-lavender underline-offset-2 hover:underline"
+                      >
+                        Compile a seller policy
+                      </Link>{" "}
+                      to add one.
+                    </>
+                  ) : selectedPolicy ? (
+                    `List $${selectedPolicy.list_price.toFixed(2)} · floor $${selectedPolicy.floor.toFixed(2)} · ${selectedPolicy.deposit_percent}% deposit · ${selectedPolicy.delivery_days} ${selectedPolicy.delivery_days === 1 ? "day" : "days"}. The backend checks this ID when the negotiation starts.`
+                  ) : (
+                    "No policy selected, so the negotiation uses the three default sellers."
+                  )}
+                </p>
+                {selectedPolicy && !replay ? (
+                  <p className="break-all font-mono text-[11px] text-faint">
+                    policy_id {selectedPolicy.policy_id}
+                  </p>
+                ) : null}
+                {policyUnavailable && failedPolicy ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2.5"
+                  >
+                    <p className="text-xs leading-relaxed text-danger">
+                      The backend no longer has “{failedPolicy.name}” in memory —
+                      a server restart clears compiled policies. Remove it here,
+                      or choose another policy and start again.
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => forgetPolicy(failedPolicy.policy_id)}
+                    >
+                      Remove saved policy
+                    </Button>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2 rounded-lg border border-line bg-surface-2/40 p-3">
