@@ -131,4 +131,9 @@ export interface NegotiateParams {
   target?: number;
   policyId?: string;
   replay?: boolean;
+  /** Per-seller price and delivery overrides. Live negotiations only. */
+  sellerPrices?: Record<
+    string,
+    { list: number; floor: number; delivery_days?: number }
+  >;
 }

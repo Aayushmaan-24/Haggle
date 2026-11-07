@@ -76,6 +76,16 @@ def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch mon
             if not (0 < fl <= lp <= 1_000_000):
                 raise HTTPException(400, f'floor must be above 0 and not above list for {s["name"]}')
             s["list_price"], s["floor"] = round(lp, 2), round(fl, 2)
+            if "delivery_days" in o:
+                try:
+                    delivery = int(o["delivery_days"])
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f'bad delivery days for {s["name"]}')
+                if not (1 <= delivery <= 30):
+                    raise HTTPException(
+                        400, f'delivery days must be between 1 and 30 for {s["name"]}'
+                    )
+                s["delivery_days"] = delivery
     if policy_id:
         p = POLICIES.get(policy_id)
         if not p:

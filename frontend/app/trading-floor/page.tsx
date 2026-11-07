@@ -7,13 +7,16 @@ import {
   Activity,
   ArrowRight,
   ChartSpline,
+  ChevronDown,
   CircleDollarSign,
   Gavel,
   Info,
   Loader2,
   Play,
   Radio,
+  RotateCcw,
   ServerCrash,
+  SlidersHorizontal,
   Trophy,
   Wallet,
 } from "lucide-react";
@@ -51,12 +54,41 @@ type Lane = {
 
 const MAX_ROUNDS = 5;
 
+/** Names must match `backend/market.py` exactly. Prices are entered per run. */
+const SELLER_NAMES = ["Firm Co", "Flex Ltd", "Premium Hub"] as const;
+
+type SellerPriceInput = { list: string; floor: string; delivery: string };
+
+function blankSellerPriceInputs(): Record<string, SellerPriceInput> {
+  return Object.fromEntries(
+    SELLER_NAMES.map((name) => [name, { list: "", floor: "", delivery: "" }]),
+  );
+}
+
+/**
+ * Lane hues in first-appearance order. Eight distinct colours keep the chart,
+ * name dot and legend readable on the dark canvas even when a custom policy
+ * joins the three default sellers.
+ */
+const SELLER_COLORS = [
+  "#8b6cff", // violet
+  "#4fd1c5", // teal
+  "#f0a35e", // amber
+  "#ff5ca8", // hot pink
+  "#b8f24b", // lime
+  "#64b5ff", // sky
+  "#f7d154", // yellow
+  "#ff8a65", // coral
+] as const;
+
 function money(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** Wrap with modulo so a seller can never fall outside the palette. */
 function sellerColor(index: number): string {
-  return `var(--color-seller-${(index % 4) + 1})`;
+  const count = SELLER_COLORS.length;
+  return SELLER_COLORS[((index % count) + count) % count] ?? SELLER_COLORS[0];
 }
 
 /**
@@ -154,6 +186,10 @@ export default function TradingFloorPage() {
   const [attemptedPolicyId, setAttemptedPolicyId] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
+  const [sellerPricesOpen, setSellerPricesOpen] = useState(false);
+  const [sellerPrices, setSellerPrices] = useState<Record<string, SellerPriceInput>>(
+    blankSellerPriceInputs,
+  );
   const itemRef = useRef<HTMLInputElement>(null);
 
   const parsedBudget = Number(budget);
@@ -183,10 +219,49 @@ export default function TradingFloorPage() {
   const showRelationError = Boolean(relationError) && (submitAttempted || touched.target);
   const isValid = !itemError && !budgetError && !targetError && !relationError;
 
+  const sellerPriceErrors = useMemo(() => {
+    const errors: Record<string, string | null> = {};
+    for (const name of SELLER_NAMES) {
+      const entry = sellerPrices[name];
+      const listText = entry?.list.trim() ?? "";
+      const floorText = entry?.floor.trim() ?? "";
+      const deliveryText = entry?.delivery.trim() ?? "";
+      const list = Number(listText);
+      const floor = Number(floorText);
+      const delivery = Number(deliveryText);
+
+      if (listText === "" || floorText === "" || deliveryText === "") {
+        errors[name] = "Enter list price, lowest price and delivery days.";
+      } else if (
+        !Number.isFinite(list) ||
+        !Number.isFinite(floor) ||
+        !Number.isFinite(delivery)
+      ) {
+        errors[name] = "List, lowest and delivery must be numbers.";
+      } else if (list <= 0) {
+        errors[name] = "List price must be above $0.";
+      } else if (floor <= 0) {
+        errors[name] = "Lowest price must be above $0.";
+      } else if (floor > list) {
+        errors[name] = "Lowest price cannot be above the list price.";
+      } else if (!Number.isInteger(delivery) || delivery < 1 || delivery > 30) {
+        errors[name] = "Delivery must be a whole number from 1 to 30 days.";
+      } else {
+        errors[name] = null;
+      }
+    }
+    return errors;
+  }, [sellerPrices]);
+
+  const sellerPricesValid = SELLER_NAMES.every((name) => !sellerPriceErrors[name]);
+  // Replay ignores overrides, so invalid edits only block a live run.
+  const sellerPricesBlocking = !replay && !sellerPricesValid;
+  const showCustomPolicy = Boolean(selectedPolicy);
+
   const sessionActive =
     state.connectionStatus === "open" || state.connectionStatus === "connecting";
   const running = sessionActive && !state.result;
-  const canStart = !submitting && !sessionActive;
+  const canStart = !submitting && !sessionActive && !sellerPricesBlocking;
 
   // A policy is only attached to live runs; the recorded replay has its own cast.
   const policyId = replay ? undefined : selectedPolicy?.policy_id;
@@ -235,9 +310,58 @@ export default function TradingFloorPage() {
       ? (savedAmount / result.list_price) * 100
       : 0;
 
+  function updateSellerPrice(
+    name: string,
+    field: "list" | "floor" | "delivery",
+    value: string,
+  ) {
+    setSellerPrices((current) => ({
+      ...current,
+      [name]: { ...current[name], [field]: value },
+    }));
+  }
+
+  function clearSellerPrices() {
+    setSellerPrices(blankSellerPriceInputs());
+  }
+
+  function matchShopPrices() {
+    if (!selectedPolicy) return;
+    setSellerPrices(
+      Object.fromEntries(
+        SELLER_NAMES.map((name) => [
+          name,
+          {
+            list: String(selectedPolicy.list_price),
+            floor: String(selectedPolicy.floor),
+            delivery: String(selectedPolicy.delivery_days),
+          },
+        ]),
+      ),
+    );
+  }
+
+  /** Numeric overrides for the live endpoint; replay keeps its recorded prices. */
+  function liveSellerPrices():
+    | Record<string, { list: number; floor: number; delivery_days: number }>
+    | undefined {
+    if (replay) return undefined;
+    return Object.fromEntries(
+      SELLER_NAMES.map((name) => [
+        name,
+        {
+          list: Number(sellerPrices[name].list),
+          floor: Number(sellerPrices[name].floor),
+          delivery_days: Number(sellerPrices[name].delivery),
+        },
+      ]),
+    );
+  }
+
   function start() {
     setSubmitAttempted(true);
-    if (!isValid || submitting || sessionActive) return;
+    if (sellerPricesBlocking) setSellerPricesOpen(true);
+    if (!isValid || sellerPricesBlocking || submitting || sessionActive) return;
 
     setSubmitting(true);
     setAttemptedPolicyId(policyId ?? null);
@@ -250,6 +374,7 @@ export default function TradingFloorPage() {
         target: parsedTarget,
         replay,
         policyId,
+        sellerPrices: liveSellerPrices(),
       })
       .finally(() => setSubmitting(false));
   }
@@ -285,9 +410,9 @@ export default function TradingFloorPage() {
         : "Using the three default sellers.";
 
   return (
-    <div className="xl:flex xl:h-[calc(100dvh-9.5rem)] xl:flex-col">
+    <div className="xl:flex xl:min-h-[calc(100dvh-8.5rem)] xl:flex-col">
       {/* Header -------------------------------------------------------- */}
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="label mb-1.5 text-accent">Live negotiation</p>
           <h1 className="text-h1 font-semibold text-ink">Trading Floor</h1>
@@ -310,8 +435,8 @@ export default function TradingFloorPage() {
       </div>
 
       {/* Mandate ------------------------------------------------------- */}
-      <div className="card shrink-0 p-3.5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.62fr)_minmax(0,0.62fr)_minmax(0,1.15fr)_auto_auto] xl:items-end">
+      <div className="card shrink-0 p-3">
+        <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.62fr)_minmax(0,0.62fr)_minmax(0,1.15fr)_auto_auto] xl:items-end">
           <div className="space-y-1.5">
             <label htmlFor="item" className="label block">
               What do you want to buy?
@@ -469,7 +594,7 @@ export default function TradingFloorPage() {
           </Button>
         </div>
 
-        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <p className="min-w-0 flex-1 truncate text-[11px] text-faint">
             {policyHelp}
             {!replay && savedPolicies.length === 0 ? (
@@ -491,8 +616,202 @@ export default function TradingFloorPage() {
           </div>
         </div>
 
+        {/* Seller prices ------------------------------------------------ */}
+        <div className="mt-2.5 border-t border-line/70 pt-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <button
+              type="button"
+              onClick={() => setSellerPricesOpen((open) => !open)}
+              aria-expanded={sellerPricesOpen}
+              aria-controls="seller-prices-panel"
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted transition-colors hover:text-ink"
+            >
+              <SlidersHorizontal className="size-3.5 text-accent" aria-hidden="true" />
+              Seller prices
+              {sellerPricesBlocking ? (
+                <span className="font-normal text-danger">· check values</span>
+              ) : null}
+              <ChevronDown
+                className={cn(
+                  "size-3.5 transition-transform",
+                  sellerPricesOpen && "rotate-180",
+                )}
+                aria-hidden="true"
+              />
+            </button>
+            <span className="text-[10px] text-faint">
+              {replay
+                ? "Recorded negotiations use fixed prices."
+                : "Used for live negotiations only."}
+            </span>
+          </div>
+
+          {sellerPricesOpen ? (
+            <div id="seller-prices-panel" className="mt-2.5">
+              {replay ? (
+                <p className="mb-2 rounded-control border border-line bg-surface-2/60 px-3 py-2 text-[11px] text-faint">
+                  Recorded negotiations use fixed prices.
+                </p>
+              ) : null}
+
+              <div
+                className={cn(
+                  "grid gap-2 sm:grid-cols-2",
+                  showCustomPolicy ? "xl:grid-cols-4" : "xl:grid-cols-3",
+                  replay && "opacity-50",
+                )}
+                aria-disabled={replay || undefined}
+              >
+                {SELLER_NAMES.map((name) => {
+                  const error = sellerPriceErrors[name];
+                  const entry = sellerPrices[name];
+                  const slug = name.toLowerCase().replace(/\s+/g, "-");
+                  return (
+                    <div
+                      key={name}
+                      className="rounded-control border border-line bg-surface-2/40 p-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-[11px] font-medium text-ink">
+                          {name}
+                        </span>
+                        {error ? (
+                          <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-danger">
+                            Invalid
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-3 gap-2">
+                        <label htmlFor={`seller-${slug}-list`} className="block">
+                          <span className="label mb-1 block text-[9px]">List price</span>
+                          <input
+                            id={`seller-${slug}-list`}
+                            type="number"
+                            min={0.01}
+                            step="0.01"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={entry.list}
+                            onChange={(event) =>
+                              updateSellerPrice(name, "list", event.target.value)
+                            }
+                            disabled={replay}
+                            aria-invalid={Boolean(error) || undefined}
+                            aria-describedby={error ? `seller-${slug}-error` : undefined}
+                            className={cn("field num h-8 px-2 text-[12px]", error && INPUT_ERROR)}
+                          />
+                        </label>
+                        <label htmlFor={`seller-${slug}-floor`} className="block">
+                          <span className="label mb-1 block text-[9px]">Lowest price</span>
+                          <input
+                            id={`seller-${slug}-floor`}
+                            type="number"
+                            min={0.01}
+                            step="0.01"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={entry.floor}
+                            onChange={(event) =>
+                              updateSellerPrice(name, "floor", event.target.value)
+                            }
+                            disabled={replay}
+                            aria-invalid={Boolean(error) || undefined}
+                            aria-describedby={error ? `seller-${slug}-error` : undefined}
+                            className={cn("field num h-8 px-2 text-[12px]", error && INPUT_ERROR)}
+                          />
+                        </label>
+                        <label htmlFor={`seller-${slug}-delivery`} className="block">
+                          <span className="label mb-1 block text-[9px]">Delivery</span>
+                          <input
+                            id={`seller-${slug}-delivery`}
+                            type="number"
+                            min={1}
+                            max={30}
+                            step="1"
+                            inputMode="numeric"
+                            placeholder="days"
+                            value={entry.delivery}
+                            onChange={(event) =>
+                              updateSellerPrice(name, "delivery", event.target.value)
+                            }
+                            disabled={replay}
+                            aria-invalid={Boolean(error) || undefined}
+                            aria-describedby={error ? `seller-${slug}-error` : undefined}
+                            className={cn("field num h-8 px-2 text-[12px]", error && INPUT_ERROR)}
+                          />
+                        </label>
+                      </div>
+                      {error ? (
+                        <p id={`seller-${slug}-error`} className="mt-1 text-[10px] text-danger">
+                          {error}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
+
+                {showCustomPolicy && selectedPolicy ? (
+                  <div className="rounded-control border border-accent-line bg-accent-soft/40 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-[11px] font-medium text-ink">
+                        {selectedPolicy.name}
+                      </span>
+                      <Badge tone="accent">Custom</Badge>
+                    </div>
+                    <div className="mt-1.5 grid grid-cols-3 gap-2">
+                      <div>
+                        <span className="label mb-1 block text-[9px]">List price</span>
+                        <p className="num text-[12px] font-medium text-ink">
+                          {money(selectedPolicy.list_price)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="label mb-1 block text-[9px]">Lowest price</span>
+                        <p className="num text-[12px] font-medium text-ink">
+                          {money(selectedPolicy.floor)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="label mb-1 block text-[9px]">Delivery</span>
+                        <p className="num text-[12px] font-medium text-ink">
+                          {selectedPolicy.delivery_days}d
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={matchShopPrices}
+                      disabled={replay}
+                      className="mt-2 w-full"
+                    >
+                      Match my shop prices
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[10px] text-faint">
+                  Lowest price must be above $0 and not above list. Sellers above 7
+                  delivery days are marked out.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearSellerPrices}
+                  disabled={replay}
+                >
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
+                  Clear values
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         {running ? (
-          <div className="mt-2.5 h-1 overflow-hidden rounded-pill bg-surface-3">
+          <div className="mt-2 h-1 overflow-hidden rounded-pill bg-surface-3">
             <div
               className="h-full rounded-pill bg-gradient-to-r from-accent to-info transition-[width] duration-500"
               style={{ width: `${Math.min(100, (currentRound / MAX_ROUNDS) * 100)}%` }}
@@ -500,9 +819,11 @@ export default function TradingFloorPage() {
           </div>
         ) : null}
 
-        {submitAttempted && !isValid ? (
+        {submitAttempted && (!isValid || sellerPricesBlocking) ? (
           <p role="alert" className="mt-2 text-[11px] text-danger">
-            Fix the highlighted fields to start the negotiation.
+            {!isValid
+              ? "Fix the highlighted fields to start the negotiation."
+              : "Fix the seller prices to start the negotiation."}
           </p>
         ) : null}
       </div>
@@ -578,7 +899,7 @@ export default function TradingFloorPage() {
       ) : null}
 
       {/* Arena --------------------------------------------------------- */}
-      <div className="mt-3 min-h-0 xl:flex-1">
+      <div className="mt-2.5 xl:flex-1">
         {state.events.length === 0 && !connecting ? (
           <div className="card flex h-full min-h-[420px] flex-col items-center justify-center p-8 text-center xl:min-h-0">
             <div className="relative">
@@ -615,33 +936,24 @@ export default function TradingFloorPage() {
             </div>
           </div>
         ) : connecting ? (
-          <div className="grid h-full min-h-0 gap-3 xl:grid-cols-12">
-            <div className="grid gap-3 sm:grid-cols-2 xl:col-span-8 xl:grid-cols-3">
+          <div className="grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SkeletonCard />
               <SkeletonCard />
               <SkeletonCard className="hidden sm:block" />
+              <SkeletonCard className="hidden xl:block" />
             </div>
-            <div className="grid gap-3 xl:col-span-4">
-              <div className="card min-h-[220px] p-card">
-                <div className="skeleton h-3 w-28" />
-                <div className="skeleton mt-4 h-40 w-full" />
-              </div>
-              <div className="card min-h-[220px] p-card">
-                <div className="skeleton h-3 w-24" />
-                <div className="mt-4 space-y-2">
-                  <div className="skeleton h-8 w-full" />
-                  <div className="skeleton h-8 w-full" />
-                  <div className="skeleton h-8 w-11/12" />
-                </div>
-              </div>
+            <div className="card min-h-[280px] p-card">
+              <div className="skeleton h-3 w-28" />
+              <div className="skeleton mt-4 h-52 w-full" />
             </div>
           </div>
         ) : (
-          <div className="grid h-full min-h-0 gap-3 xl:grid-cols-12">
+          <div className="flex flex-col gap-3">
             {/* Seller lanes ------------------------------------------- */}
             <section
               aria-label="Seller lanes"
-              className="grid min-h-0 gap-3 sm:grid-cols-2 xl:col-span-8 xl:grid-cols-3"
+              className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-3"
             >
               {lanes.map((lane) => (
                 <SellerLane
@@ -658,16 +970,14 @@ export default function TradingFloorPage() {
               ))}
             </section>
 
-            {/* Chart + offers ---------------------------------------- */}
-            <aside className="flex min-h-0 flex-col gap-3 xl:col-span-4">
-              <PriceChartCard
-                lanes={lanes}
-                target={runTarget ?? parsedTarget}
-                running={running}
-                maxRound={maxRound}
-              />
-              <OffersCard offers={offers} />
-            </aside>
+            {/* Price chart + live offers, full width below the lanes --- */}
+            <MarketCard
+              lanes={lanes}
+              offers={offers}
+              target={runTarget ?? parsedTarget}
+              running={running}
+              maxRound={maxRound}
+            />
           </div>
         )}
       </div>
@@ -709,11 +1019,23 @@ function SellerLane({
     delta !== null && previous && previous.price !== 0
       ? (delta / previous.price) * 100
       : null;
+  const changeNote =
+    delta === null
+      ? latest
+        ? `Opening at ${money(latest.price)}`
+        : lane.statusPrice !== null
+          ? "Waiting for a final offer"
+          : "Waiting for an offer"
+      : delta < 0
+        ? `Lowered ${money(Math.abs(delta))} from the last offer`
+        : delta > 0
+          ? `Raised ${money(delta)} from the last offer`
+          : "Holding at the same price";
 
   useEffect(() => {
     const element = scrollRef.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [lane.offers.length]);
+  }, [lane.offers.length, lane.status]);
 
   const badge = winner ? (
     <Badge tone="success">
@@ -739,65 +1061,66 @@ function SellerLane({
   return (
     <article
       className={cn(
-        "card flex min-h-[300px] flex-col xl:min-h-0",
+        "card flex flex-col",
         winner && "border-success-line bg-gradient-to-b from-success-soft/60 via-surface to-surface animate-glow",
         !winner && responding && "border-accent-line",
         !winner && hasResult && lane.status !== "deal" && "opacity-75",
       )}
     >
-      <div className="flex items-start justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+      <div className="flex items-start justify-between gap-2 border-b border-line px-3.5 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
             <span
-              className="size-2 shrink-0 rounded-full"
+              className="mt-1 size-2.5 shrink-0 rounded-full"
               style={{ backgroundColor: lane.color }}
               aria-hidden="true"
             />
-            <h3 className="truncate text-[13px] font-semibold text-ink">{lane.seller}</h3>
+            <h3 className="min-w-0 break-words text-[13px] font-semibold leading-snug text-ink">
+              {lane.seller}
+            </h3>
           </div>
-          <p className="mt-0.5 text-[10px] text-faint">Round {lane.lastRound || 0}</p>
+          <p className="mt-0.5 truncate text-[10px] text-faint">
+            Round {lane.lastRound || 0}
+            {latest
+              ? ` · ${Math.round(latest.deposit_percent)}% deposit · ${latest.delivery_days}d`
+              : lane.note
+                ? ` · ${lane.note}`
+                : ""}
+          </p>
         </div>
         {badge}
       </div>
 
-      <div className="flex items-end justify-between gap-2 px-4 pb-3 pt-3.5">
-        <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
-            Current offer
-          </p>
-          <p
-            key={`${price ?? "none"}-${latest?.index ?? "status"}`}
-            className="num animate-price mt-1 text-[30px] font-semibold leading-none text-ink"
-          >
-            {price !== null && price !== undefined ? money(price) : "—"}
-          </p>
-          <p className="mt-1.5 text-[11px] text-muted">
-            {latest
-              ? `${Math.round(latest.deposit_percent)}% deposit · ${latest.delivery_days}-day delivery`
-              : lane.note ?? "Waiting for an offer"}
-          </p>
-        </div>
-        {delta !== null ? (
-          <span
-            className={cn(
-              "num mb-0.5 inline-flex items-center gap-1 rounded-pill border px-2 py-1 text-[10px] font-medium",
-              delta < 0
-                ? "border-success-line bg-success-soft text-success"
-                : "border-warning-line bg-warning-soft text-warning",
-            )}
-            title={`${delta < 0 ? "Lowered" : "Raised"} from the previous offer`}
-          >
-            {delta < 0 ? "▼" : "▲"} {money(Math.abs(delta))}
-            {deltaPercent !== null ? ` (${Math.abs(deltaPercent).toFixed(1)}%)` : ""}
-          </span>
-        ) : null}
+      <div className="px-3.5 pb-2.5 pt-2.5">
+        <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">
+          Current offer
+        </p>
+        <p
+          key={`${price ?? "none"}-${latest?.index ?? "status"}`}
+          className="num animate-price mt-0.5 text-[30px] font-semibold leading-[1.08] text-ink"
+        >
+          {price !== null && price !== undefined ? money(price) : "—"}
+        </p>
+        <p
+          className={cn(
+            "mt-1 truncate text-[11px]",
+            delta !== null && delta < 0
+              ? "text-success"
+              : delta !== null && delta > 0
+                ? "text-warning"
+                : "text-muted",
+          )}
+          title={deltaPercent !== null ? `${Math.abs(deltaPercent).toFixed(1)}% change` : undefined}
+        >
+          {changeNote}
+        </p>
       </div>
 
       <div
         ref={scrollRef}
         role="log"
         aria-label={`Conversation with ${lane.seller}`}
-        className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t border-line/70 px-3 py-3"
+        className="h-40 shrink-0 space-y-2 overflow-y-auto border-t border-line/70 px-3 py-2.5 xl:h-32"
       >
         {lane.offers.length === 0 ? (
           <p className="px-1 py-3 text-center text-[11px] text-faint">
@@ -839,18 +1162,77 @@ function SellerLane({
 }
 
 /* ------------------------------------------------------------------ */
-/* Price chart                                                        */
+/* Price chart + live offers                                          */
 /* ------------------------------------------------------------------ */
 
-function PriceChartCard({
+function MarketCard({
   lanes,
+  offers,
   target,
   running,
   maxRound,
 }: {
   lanes: Lane[];
+  offers: UiOffer[];
   target: number;
   running: boolean;
+  maxRound: number;
+}) {
+  const [offersOpen, setOffersOpen] = useState(false);
+
+  return (
+    <div className="card flex min-h-[380px] flex-col xl:flex-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3.5 py-2.5">
+        <div className="flex items-center gap-2">
+          <ChartSpline className="size-4 text-accent" aria-hidden="true" />
+          <h2 className="text-[13px] font-semibold text-ink">Price movement</h2>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOffersOpen((open) => !open)}
+            aria-expanded={offersOpen}
+            aria-controls="live-offers-panel"
+            className="inline-flex items-center gap-1.5 rounded-control border border-line bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:text-ink"
+          >
+            <CircleDollarSign className="size-3.5 text-accent" aria-hidden="true" />
+            Live offers
+            <span className="num rounded-pill bg-surface-3 px-1.5 text-[10px] text-muted">
+              {offers.length}
+            </span>
+            <ChevronDown
+              className={cn(
+                "size-3.5 transition-transform",
+                offersOpen && "rotate-180",
+              )}
+              aria-hidden="true"
+            />
+          </button>
+          <Badge tone={running ? "accent" : "neutral"} pulse={running}>
+            {running ? "Live" : "Final"}
+          </Badge>
+        </div>
+      </div>
+
+      <PriceChart lanes={lanes} target={target} maxRound={maxRound} />
+
+      {offersOpen ? (
+        <div id="live-offers-panel" className="border-t border-line">
+          <OffersTable offers={offers} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PriceChart({
+  lanes,
+  target,
+  maxRound,
+}: {
+  lanes: Lane[];
+  target: number;
   maxRound: number;
 }) {
   const series = lanes
@@ -859,12 +1241,6 @@ function PriceChartCard({
   const allPrices = series.flatMap((entry) => entry.points.map((point) => point.price));
   const hasData = allPrices.length > 0;
 
-  const W = 620;
-  const H = 250;
-  const L = 46;
-  const R = 14;
-  const T = 16;
-  const B = 30;
   const values = hasData ? [...allPrices, target] : [target];
   const rawMin = Math.min(...values);
   const rawMax = Math.max(...values);
@@ -873,142 +1249,161 @@ function PriceChartCard({
   const hi = Math.ceil(rawMax + padding);
   const span = Math.max(1, hi - lo);
   const axisMax = Math.max(MAX_ROUNDS, maxRound);
-  const x = (round: number) => L + (round / axisMax) * (W - L - R);
-  const y = (value: number) => T + (1 - (value - lo) / span) * (H - T - B);
   const ticks = [0, Math.round(axisMax / 2), axisMax];
   const gridValues = [lo, lo + span / 2, hi];
 
+  // Percentages position the HTML dots/labels; the 1000x320 viewBox keeps the
+  // SVG lines in sync while `preserveAspectRatio="none"` scales to any width.
+  const xPercent = (round: number) => (round / axisMax) * 100;
+  const yPercent = (value: number) => (1 - (value - lo) / span) * 100;
+  const xCoord = (round: number) => xPercent(round) * 10;
+  const yCoord = (value: number) => yPercent(value) * 3.2;
+  const targetTop = Math.max(0, Math.min(100, yPercent(target)));
+  const targetNearTop = targetTop < 14;
+
   return (
-    <div className="card flex shrink-0 flex-col xl:h-[44%] xl:min-h-[240px]">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="flex items-center gap-2">
-          <ChartSpline className="size-4 text-accent" aria-hidden="true" />
-          <h2 className="text-[13px] font-semibold text-ink">Price movement</h2>
-        </div>
-        <Badge tone={running ? "accent" : "neutral"} pulse={running}>
-          {running ? "Live" : "Final"}
-        </Badge>
-      </div>
-
-      <div className="min-h-0 flex-1 px-3 pb-2 pt-2">
+    <>
+      <div
+        data-testid="price-chart"
+        className="relative min-h-[280px] flex-1 px-3 pb-1 pt-2"
+      >
         {hasData ? (
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            className="h-full w-full"
-            role="img"
-            aria-label={`Seller prices by round, with your target of ${money(target)}`}
-          >
-            {gridValues.map((value) => (
-              <g key={value}>
-                <line
-                  x1={L}
-                  x2={W - R}
-                  y1={y(value)}
-                  y2={y(value)}
-                  stroke="var(--color-line)"
-                  strokeDasharray="3 5"
-                />
-                <text x={L - 8} y={y(value) + 4} fill="var(--color-faint)" fontSize="10" textAnchor="end" className="num">
-                  ${Math.round(value)}
-                </text>
-              </g>
-            ))}
-
-            <line
-              x1={L}
-              x2={W - R}
-              y1={y(target)}
-              y2={y(target)}
-              stroke="var(--color-accent)"
-              strokeWidth="1.5"
-              strokeDasharray="6 5"
-              opacity="0.8"
-            />
-            <text
-              x={W - R}
-              y={y(target) - 6}
-              fill="var(--color-accent)"
-              fontSize="10"
-              textAnchor="end"
-              className="num"
-            >
-              Target {money(target)}
-            </text>
-
-            {ticks.map((tick) => (
-              <text
-                key={tick}
-                x={x(tick)}
-                y={H - 8}
-                fill="var(--color-faint)"
-                fontSize="10"
-                textAnchor="middle"
+          <div className="relative h-full min-h-[264px]">
+            <div className="absolute bottom-7 left-12 right-3 top-3">
+              <svg
+                viewBox="0 0 1000 320"
+                preserveAspectRatio="none"
+                className="absolute inset-0 h-full w-full overflow-visible"
+                role="img"
+                aria-label={`Seller prices by round, with your target of ${money(target)}`}
               >
-                {tick === 0 ? "Open" : `R${tick}`}
-              </text>
-            ))}
-
-            {series.map(({ lane, points }) => (
-              <g key={lane.seller}>
-                <polyline
-                  points={points.map((point) => `${x(point.round)},${y(point.price)}`).join(" ")}
-                  fill="none"
-                  stroke={lane.color}
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeDasharray="1200"
-                  className="animate-draw"
-                />
-                {points.map((point) => (
-                  <circle
-                    key={point.index}
-                    cx={x(point.round)}
-                    cy={y(point.price)}
-                    r="2.6"
-                    fill="var(--color-surface)"
+                {series.map(({ lane, points }) => (
+                  <polyline
+                    key={lane.seller}
+                    points={points
+                      .map(
+                        (point) =>
+                          `${xCoord(point.round)},${yCoord(point.price)}`,
+                      )
+                      .join(" ")}
+                    fill="none"
                     stroke={lane.color}
-                    strokeWidth="1.8"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
                   />
                 ))}
-                {points.length > 0 ? (
-                  <circle
-                    cx={x(points[points.length - 1].round)}
-                    cy={y(points[points.length - 1].price)}
-                    r="4"
-                    fill={lane.color}
-                  />
-                ) : null}
-              </g>
-            ))}
-          </svg>
+              </svg>
+
+              {gridValues.map((value, index) => (
+                <div
+                  key={`grid-${index}`}
+                  className="pointer-events-none absolute inset-x-0 border-t border-dashed border-line/60"
+                  style={{ top: `${yPercent(value)}%` }}
+                  aria-hidden="true"
+                />
+              ))}
+
+              <div
+                className="pointer-events-none absolute inset-x-0 border-t border-dashed border-accent/80"
+                style={{ top: `${targetTop}%` }}
+                aria-hidden="true"
+              />
+
+              {series.map(({ lane, points }) =>
+                points.map((point, index) => {
+                  const last = index === points.length - 1;
+                  return (
+                    <span
+                      key={`${lane.seller}-${point.index}`}
+                      className={cn(
+                        "pointer-events-none absolute rounded-full border-2",
+                        last ? "size-2.5" : "size-2",
+                      )}
+                      style={{
+                        left: `${xPercent(point.round)}%`,
+                        top: `${yPercent(point.price)}%`,
+                        transform: "translate(-50%, -50%)",
+                        backgroundColor: last ? lane.color : "var(--color-surface)",
+                        borderColor: lane.color,
+                      }}
+                      aria-hidden="true"
+                    />
+                  );
+                }),
+              )}
+
+              <span
+                className="num pointer-events-none absolute left-0 whitespace-nowrap rounded-pill border border-accent-line bg-surface/90 px-1.5 py-0.5 text-[10px] font-semibold text-accent"
+                style={{
+                  top: `${targetTop}%`,
+                  transform: targetNearTop ? "translateY(8px)" : "translateY(-115%)",
+                }}
+              >
+                Your target {money(target)}
+              </span>
+
+              {gridValues.map((value, index) => (
+                <span
+                  key={`y-label-${index}`}
+                  className="num pointer-events-none absolute right-full mr-2 -translate-y-1/2 whitespace-nowrap text-[10px] text-faint"
+                  style={{ top: `${yPercent(value)}%` }}
+                >
+                  ${Math.round(value)}
+                </span>
+              ))}
+
+              {ticks.map((tick) => (
+                <span
+                  key={tick}
+                  className="pointer-events-none absolute top-full mt-1.5 whitespace-nowrap text-[10px] text-faint"
+                  style={{
+                    left: `${xPercent(tick)}%`,
+                    transform:
+                      tick === 0
+                        ? "translateX(0)"
+                        : tick === axisMax
+                          ? "translateX(-100%)"
+                          : "translateX(-50%)",
+                  }}
+                >
+                  {tick === 0 ? "Open" : `R${tick}`}
+                </span>
+              ))}
+            </div>
+          </div>
         ) : (
-          <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2 text-center">
+          <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-2 text-center">
             <Activity className="size-5 text-faint" aria-hidden="true" />
-            <p className="text-[11px] text-faint">
-              Price movement appears as sellers respond.
+            <p className="text-[12px] font-medium text-muted">Prices will appear here</p>
+            <p className="text-[10px] text-faint">
+              Seller lines appear with their first offer.
             </p>
           </div>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/70 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line/70 px-3.5 py-2">
         {lanes.map((lane) => (
-          <span key={lane.seller} className="inline-flex items-center gap-1.5 text-[10px] text-muted">
+          <span
+            key={lane.seller}
+            className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-muted sm:text-[12px]"
+          >
             <span
-              className="size-1.5 rounded-full"
+              className="size-2 shrink-0 rounded-full"
               style={{ backgroundColor: lane.color }}
               aria-hidden="true"
             />
-            {lane.seller}
+            <span className="min-w-0 truncate">{lane.seller}</span>
           </span>
         ))}
-        <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] text-accent">
+        <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-accent sm:text-[12px]">
           <span className="h-px w-4 border-t border-dashed border-accent" aria-hidden="true" />
-          Target
+          Your target
         </span>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1055,7 +1450,7 @@ const offerColumns: ColDef<UiOffer>[] = [
   },
 ];
 
-function OffersCard({ offers }: { offers: UiOffer[] }) {
+function OffersTable({ offers }: { offers: UiOffer[] }) {
   const gridRef = useRef<GridApi<UiOffer> | null>(null);
 
   useEffect(() => {
@@ -1065,33 +1460,24 @@ function OffersCard({ offers }: { offers: UiOffer[] }) {
   }, [offers.length]);
 
   return (
-    <div className="card flex min-h-[280px] flex-1 flex-col xl:min-h-0">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="flex items-center gap-2">
-          <CircleDollarSign className="size-4 text-accent" aria-hidden="true" />
-          <h2 className="text-[13px] font-semibold text-ink">Live offers</h2>
-        </div>
-        <Badge tone="neutral">{offers.length}</Badge>
-      </div>
-      <div
-        role="region"
-        aria-label="Live offers log"
-        className="min-h-0 flex-1 overflow-hidden"
-      >
-        <DataGrid
-          rowData={offers}
-          columnDefs={offerColumns}
-          getRowId={(params) => String(params.data.index)}
-          defaultColDef={{ sortable: true, resizable: true, suppressHeaderMenuButton: true }}
-          onGridReady={(params) => {
-            gridRef.current = params.api;
-            if (offers.length > 0) params.api.ensureIndexVisible(offers.length - 1, "bottom");
-          }}
-          overlayNoRowsTemplate='<span style="color:#a2a2b2;font-size:12px">Offers appear here as sellers respond.</span>'
-          suppressCellFocus
-          rowHeight={36}
-        />
-      </div>
+    <div
+      role="region"
+      aria-label="Live offers log"
+      className="h-[240px] overflow-hidden"
+    >
+      <DataGrid
+        rowData={offers}
+        columnDefs={offerColumns}
+        getRowId={(params) => String(params.data.index)}
+        defaultColDef={{ sortable: true, resizable: true, suppressHeaderMenuButton: true }}
+        onGridReady={(params) => {
+          gridRef.current = params.api;
+          if (offers.length > 0) params.api.ensureIndexVisible(offers.length - 1, "bottom");
+        }}
+        overlayNoRowsTemplate='<span style="color:#a2a2b2;font-size:12px">Offers appear here as sellers respond.</span>'
+        suppressCellFocus
+        rowHeight={36}
+      />
     </div>
   );
 }
@@ -1131,7 +1517,7 @@ function WinnerBanner({
     <section
       role="status"
       aria-label="Winning deal"
-      className="animate-glow mt-3 flex shrink-0 flex-col gap-4 rounded-card border border-success-line bg-gradient-to-r from-success-soft via-surface to-surface px-4 py-3.5 shadow-success xl:flex-row xl:items-center xl:justify-between"
+      className="animate-glow mt-2.5 flex shrink-0 flex-col gap-3 rounded-card border border-success-line bg-gradient-to-r from-success-soft via-surface to-surface px-4 py-2.5 shadow-success xl:flex-row xl:items-center xl:justify-between"
     >
       <div className="flex min-w-0 items-center gap-3.5">
         <span className="grid size-11 shrink-0 place-items-center rounded-panel border border-success-line bg-success-soft text-success">
