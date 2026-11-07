@@ -53,10 +53,39 @@ def public(d: dict) -> dict:
 
 @app.get("/api/negotiate")
 def negotiate(budget: float = 90, target: float = 85, item: str = "a 27-inch monitor",
-              policy_id: str | None = None, replay: bool = False):
+              policy_id: str | None = None, replay: bool = False,
+              prices: str | None = None):
     if not (0 < target <= budget):
         raise HTTPException(400, "target must be positive and not above budget")
-    sellers = list(market.SELLERS)
+    sellers = [dict(s) for s in market.SELLERS]
+    if prices:
+        try:
+            overrides = json.loads(prices)
+        except ValueError:
+            raise HTTPException(400, "prices must be valid JSON")
+        if not isinstance(overrides, dict):
+            raise HTTPException(400, "prices must be an object")
+        for s in sellers:
+            o = overrides.get(s["name"])
+            if o is None:
+                continue
+            try:
+                lp, fl = float(o["list"]), float(o["floor"])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(400, f'bad prices for {s["name"]}')
+            if not (0 < fl <= lp <= 1_000_000):
+                raise HTTPException(400, f'floor must be above 0 and not above list for {s["name"]}')
+            s["list_price"], s["floor"] = round(lp, 2), round(fl, 2)
+            if "delivery_days" in o:
+                try:
+                    delivery = int(o["delivery_days"])
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f'bad delivery days for {s["name"]}')
+                if not (1 <= delivery <= 30):
+                    raise HTTPException(
+                        400, f'delivery days must be between 1 and 30 for {s["name"]}'
+                    )
+                s["delivery_days"] = delivery
     if policy_id:
         p = POLICIES.get(policy_id)
         if not p:

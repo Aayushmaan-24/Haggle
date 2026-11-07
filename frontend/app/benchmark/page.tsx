@@ -1,39 +1,35 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
-import Link from "next/link";
 import {
-  ArrowRight,
+  Activity,
+  BadgeCheck,
+  BarChart3,
   Check,
-  CircleSlash,
+  CircleDollarSign,
+  FlaskConical,
   Handshake,
-  LayoutDashboard,
-  ScrollText,
+  Info,
+  Play,
   ShieldCheck,
+  TrendingDown,
 } from "lucide-react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { ButtonLink } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { StatCard } from "@/components/ui/StatCard";
 import { cn } from "@/lib/cn";
+import { BenchmarkGrid, type BenchmarkRow } from "@/components/benchmark/BenchmarkGrid";
 
 export const metadata: Metadata = {
   title: "Benchmark",
   description:
-    "Fixed-seed negotiation runs checked against the buyer's budget, the winning seller's price floor and the delivery deadline.",
+    "A recorded set of negotiations, checked against the buyer's budget, each seller's price floor and the delivery deadline.",
 };
 
-type BenchmarkRun = {
-  budget: number;
-  target: number;
-  deal: boolean;
-  seller?: string;
-  price?: number;
-  list_price?: number;
-  saving_vs_list?: number;
-  saving_vs_cheapest?: number;
-  guard_ok?: boolean;
-};
+type BenchmarkRun = Omit<BenchmarkRow, "run">;
 
 type BenchmarkSnapshot = {
   summary: {
@@ -46,19 +42,357 @@ type BenchmarkSnapshot = {
   runs: BenchmarkRun[];
 };
 
+type SnapshotLoad =
+  | { status: "ok"; data: BenchmarkSnapshot }
+  | { status: "empty" }
+  | { status: "error" };
+
 /**
- * The benchmark is a script, not an API: it writes `data/benchmark.json` at the
- * repository root. Read that file during the build and inline the result, so the
- * static export ships a real snapshot instead of a placeholder or invented numbers.
- * A missing or unreadable file is a normal state and falls back to the empty state.
+ * The benchmark is a script, not a live endpoint: it writes `data/benchmark.json`
+ * at the repository root. Read that file during the build and inline it, so the
+ * static export ships real recorded figures instead of invented ones.
  */
-function loadSnapshot(): BenchmarkSnapshot | null {
+function loadSnapshot(): SnapshotLoad {
+  let raw: string;
   try {
-    const file = path.join(process.cwd(), "..", "data", "benchmark.json");
-    return JSON.parse(readFileSync(file, "utf8")) as BenchmarkSnapshot;
+    raw = readFileSync(path.join(process.cwd(), "..", "data", "benchmark.json"), "utf8");
   } catch {
-    return null;
+    return { status: "empty" };
   }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isSnapshot(parsed)) return { status: "error" };
+    if (parsed.summary.runs === 0 || parsed.runs.length === 0) return { status: "empty" };
+    return { status: "ok", data: parsed };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+function isSnapshot(value: unknown): value is BenchmarkSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.summary === "object" &&
+    record.summary !== null &&
+    Array.isArray(record.runs)
+  );
+}
+
+const pct = (value: number) => `${value.toFixed(1)}%`;
+
+const CHECKS = [
+  {
+    title: "Within budget",
+    body: "The agreed price never exceeds the buyer's budget.",
+  },
+  {
+    title: "Above the seller's floor",
+    body: "No seller is pushed below the minimum it set for itself.",
+  },
+  {
+    title: "Inside the delivery limit",
+    body: "Promised delivery stays within the buyer's seven-day limit.",
+  },
+];
+
+const METHOD = [
+  "Seven purchases across a spread of catalog sizes, budgets and delivery promises.",
+  "Every run starts from the same buyer mandate, so the results are directly comparable.",
+  "List prices and seller floors vary within each scenario's price range.",
+  "Runs are spaced out so live agents stay within their usage limits.",
+];
+
+const READING = [
+  "Savings averages cover closed deals only.",
+  "“Versus list” compares with the winning seller's own list price. “Versus cheapest” compares with the lowest list price on the floor.",
+  "Negotiations vary, so treat these as a representative sample, not a guarantee.",
+  "The list below shows every recorded run, in the order it happened.",
+];
+
+export default function BenchmarkPage() {
+  const load = loadSnapshot();
+  const data = load.status === "ok" ? load.data : null;
+  const summary = data?.summary;
+  const runs = data?.runs ?? [];
+  const closedDeals = runs.filter((run) => run.deal);
+  const failedGuards = closedDeals.filter((run) => run.guard_ok === false);
+  const rows: BenchmarkRow[] = runs.map((run, index) => ({ ...run, run: index + 1 }));
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Recorded results"
+        title="Benchmark"
+        description="A fixed set of negotiations, replayed to show how the buyer agent performs against budgets, seller floors and delivery limits."
+        actions={
+          <ButtonLink href="/trading-floor" variant="secondary">
+            <Play className="size-3.5 fill-current" aria-hidden="true" />
+            Watch a negotiation
+          </ButtonLink>
+        }
+      />
+
+      {load.status === "error" ? (
+        <ErrorState
+          title="Recorded results are unavailable"
+          description="We could not load the benchmark results for this page. Refresh, and they should appear."
+        />
+      ) : load.status === "empty" ? (
+        <EmptyState
+          icon={BarChart3}
+          title="No recorded results yet"
+          description="The benchmark has not been recorded for this build. Results will appear here once they are available."
+          action={<ButtonLink href="/trading-floor">Watch a negotiation</ButtonLink>}
+        />
+      ) : summary ? (
+        <>
+          {/* Honesty strip -------------------------------------------- */}
+          <section
+            aria-labelledby="recorded-heading"
+            className="flex flex-col gap-2.5 rounded-card border border-line bg-surface px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3"
+          >
+            <span className="grid size-8 shrink-0 place-items-center rounded-control border border-accent-line bg-accent-soft text-accent">
+              <Info className="size-4" aria-hidden="true" />
+            </span>
+            <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-muted">
+              <span id="recorded-heading" className="font-medium text-ink">
+                Recorded results.
+              </span>{" "}
+              These negotiations were run as one set and are shown exactly as recorded,
+              not sampled live.
+            </p>
+            <Badge tone="neutral" dot={false}>
+              <FlaskConical className="size-3" aria-hidden="true" />
+              Representative sample
+            </Badge>
+          </section>
+
+          {/* Summary -------------------------------------------------- */}
+          <section aria-labelledby="summary-heading" className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 id="summary-heading" className="text-h2 font-semibold text-ink">
+                  Summary
+                </h2>
+                <p className="mt-0.5 text-small text-muted">
+                  The headline numbers from this recorded set.
+                </p>
+              </div>
+              <span className="num rounded-pill border border-line bg-surface-2 px-2.5 py-1 text-[10px] text-faint">
+                Runs {String(summary.runs).padStart(2, "0")}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+              <StatCard
+                label="Completed runs"
+                value={String(summary.runs)}
+                hint="Negotiations in this set."
+                icon={Activity}
+              />
+              <StatCard
+                label="Deal rate"
+                value={pct(summary.deal_rate_pct)}
+                hint="Closed with a winning seller."
+                icon={Handshake}
+                tone="positive"
+              />
+              <StatCard
+                label="Avg. saving vs list"
+                value={pct(summary.avg_saving_vs_list_pct)}
+                hint="Against the winner's own list price."
+                icon={TrendingDown}
+                tone="positive"
+              />
+              <StatCard
+                label="Avg. saving vs cheapest"
+                value={pct(summary.avg_saving_vs_cheapest_list_pct)}
+                hint="Against the lowest list price on the floor."
+                icon={CircleDollarSign}
+              />
+              <StatCard
+                label="Check violations"
+                value={String(summary.guard_violations)}
+                hint="Deals that broke a budget, floor or delivery rule."
+                icon={ShieldCheck}
+                tone={summary.guard_violations === 0 ? "positive" : "negative"}
+                className="col-span-2 sm:col-span-1"
+              />
+            </div>
+          </section>
+
+          {/* Checks --------------------------------------------------- */}
+          <section aria-labelledby="checks-heading" className="card p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="label mb-1.5 text-accent">The safety net</p>
+                <h2 id="checks-heading" className="text-h2 font-semibold text-ink">
+                  Three checks after every deal
+                </h2>
+              </div>
+              {failedGuards.length === 0 ? (
+                <Badge tone="success">
+                  <BadgeCheck className="size-3" aria-hidden="true" />
+                  All {closedDeals.length} deals passed
+                </Badge>
+              ) : (
+                <Badge tone="danger">
+                  {failedGuards.length} of {closedDeals.length} deals failed
+                </Badge>
+              )}
+            </div>
+
+            <div className="mt-5 grid gap-x-8 gap-y-5 border-t border-line pt-5 sm:grid-cols-3">
+              {CHECKS.map((check) => (
+                <div key={check.title} className="flex gap-3">
+                  <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-control border border-success-line/60 bg-success-soft text-success">
+                    <Check className="size-4" aria-hidden="true" />
+                  </span>
+                  <div>
+                    <h3 className="text-[13px] font-semibold text-ink">{check.title}</h3>
+                    <p className="mt-0.5 text-small leading-relaxed text-muted">{check.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Scenarios ------------------------------------------------- */}
+          <section aria-labelledby="scenarios-heading" className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 id="scenarios-heading" className="text-h2 font-semibold text-ink">
+                  Recorded scenarios
+                </h2>
+                <p className="mt-0.5 text-small text-muted">
+                  Every run in order. Sort any column to compare.
+                </p>
+              </div>
+              <span className="num rounded-pill border border-line bg-surface-2 px-2.5 py-1 text-[10px] text-faint">
+                USD
+              </span>
+            </div>
+
+            {/* AG Grid Community, wide screens only */}
+            <div className="card hidden overflow-hidden xl:block">
+              <BenchmarkGrid rows={rows} />
+            </div>
+
+            {/* Compact list for tablets and phones */}
+            <ul className="grid gap-3 xl:hidden">
+              {rows.map((run) => (
+                <li key={run.run} className="card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium text-ink">
+                        <span className="num mr-1.5 text-[11px] text-faint">
+                          Run {String(run.run).padStart(2, "0")}
+                        </span>
+                        {run.deal && run.seller ? run.seller : "No deal"}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-faint">
+                        {run.deal ? "Closed with a winning seller" : "No seller met the mandate"}
+                      </p>
+                    </div>
+                    <GuardMark run={run} />
+                  </div>
+
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-line/70 pt-3">
+                    <Pair label="Budget" value={usd.format(run.budget)} />
+                    <Pair label="Target" value={usd.format(run.target)} />
+                    {run.deal && run.price !== undefined ? (
+                      <>
+                        <Pair label="Agreed" value={usd.format(run.price)} />
+                        <Pair
+                          label="List"
+                          value={
+                            run.list_price !== undefined ? usd.format(run.list_price) : "—"
+                          }
+                          muted
+                        />
+                        <Pair
+                          label="Saving vs list"
+                          value={
+                            run.saving_vs_list !== undefined
+                              ? pct(run.saving_vs_list)
+                              : "—"
+                          }
+                          tone="positive"
+                          className="col-span-2"
+                        />
+                      </>
+                    ) : (
+                      <Pair label="Outcome" value="No deal" muted className="col-span-2" />
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* Method --------------------------------------------------- */}
+          <section aria-labelledby="method-heading" className="space-y-3">
+            <div>
+              <h2 id="method-heading" className="text-h2 font-semibold text-ink">
+                How to read these results
+              </h2>
+              <p className="mt-0.5 text-small text-muted">
+                Context for the numbers above, kept short.
+              </p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="card p-5">
+                <div className="flex items-center gap-2">
+                  <FlaskConical className="size-4 text-accent" aria-hidden="true" />
+                  <h3 className="text-[13px] font-semibold text-ink">
+                    How the scenarios were built
+                  </h3>
+                </div>
+                <BulletList items={METHOD} />
+              </div>
+              <div className="card p-5">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="size-4 text-accent" aria-hidden="true" />
+                  <h3 className="text-[13px] font-semibold text-ink">
+                    How to read the results
+                  </h3>
+                </div>
+                <BulletList items={READING} />
+              </div>
+            </div>
+          </section>
+
+          {/* CTA ------------------------------------------------------ */}
+          <section className="card relative overflow-hidden p-6 sm:p-8">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full bg-accent/10 blur-3xl"
+            />
+            <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="label mb-1.5 text-accent">See it live</p>
+                <h2 className="text-h2 font-semibold text-ink">
+                  The numbers are recorded. The floor is not.
+                </h2>
+                <p className="mt-1 max-w-xl text-body text-muted">
+                  Start a negotiation and watch every seller respond in real time.
+                </p>
+              </div>
+              <ButtonLink href="/trading-floor" size="lg" className="shrink-0">
+                <Play className="size-4 fill-current" aria-hidden="true" />
+                Watch a negotiation
+              </ButtonLink>
+            </div>
+            <p className="relative mt-5 border-t border-line pt-4 text-micro text-faint">
+              Payments run in the PayPal sandbox. No real money moves.
+            </p>
+          </section>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 const usd = new Intl.NumberFormat("en-US", {
@@ -68,483 +402,17 @@ const usd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-const pct = (value: number) => `${value.toFixed(1)}%`;
-
-const CHECKS = [
-  {
-    title: "Within budget",
-    body: "The winning price cannot exceed the buyer's budget.",
-  },
-  {
-    title: "At or above the seller's floor",
-    body: "No seller is pushed below its own price floor.",
-  },
-  {
-    title: "Inside the delivery cap",
-    body: "Promised delivery days cannot exceed the mandate's maximum.",
-  },
-];
-
-const METHOD = [
-  "Catalogs are rescaled by 0.5× to 10×, with list prices and floors jittered slightly.",
-  "Budgets are 85–95% of the average list price; the target is 94% of the budget.",
-  "Seed 42 makes the scenario sequence reproducible.",
-  "Runs are spaced five seconds apart to stay under model rate limits.",
-];
-
-const READING = [
-  "Saving averages cover closed deals only.",
-  "“Versus list” compares with the winner's own list price; “versus cheapest” with the lowest list price on the floor.",
-  "Model output varies, so these figures describe this agent on these scenarios only.",
-  "The snapshot is baked in at build time; regenerate it and rebuild to update.",
-];
-
-const NEXT_LINKS = [
-  {
-    href: "/trading-floor",
-    label: "Trading Floor",
-    body: "Watch a negotiation live.",
-    icon: Handshake,
-  },
-  {
-    href: "/policy",
-    label: "Seller Policy",
-    body: "Compile selling rules.",
-    icon: ScrollText,
-  },
-  {
-    href: "/",
-    label: "Overview",
-    body: "How the flow fits together.",
-    icon: LayoutDashboard,
-  },
-];
-
-export default function BenchmarkPage() {
-  const data = loadSnapshot();
-  const runs = data?.runs ?? [];
-  const summary = data?.summary;
-  const hasData = Boolean(summary && summary.runs > 0 && runs.length > 0);
-
-  const closedDeals = runs.filter((run) => run.deal);
-  const failedGuards = closedDeals.filter((run) => run.guard_ok === false);
-
-  return (
-    <div className="space-y-8">
-      <PageHeader
-        eyebrow="Performance"
-        title="Benchmark"
-        description="Fixed-seed purchases checked against budget, price floor and delivery deadline."
-        actions={<ButtonLink href="/trading-floor">Open Trading Floor</ButtonLink>}
-      />
-
-      <section
-        aria-labelledby="snapshot-heading"
-        className="rounded-panel border border-line bg-surface px-5 py-4"
-      >
-        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
-          <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-md border border-lavender-linethin bg-lavender-soft px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-lavender">
-            Committed snapshot
-          </span>
-          <p className="text-sm leading-relaxed text-muted">
-            <span id="snapshot-heading" className="font-medium text-ink">
-              Recorded results, not live runs.
-            </span>{" "}
-            Read from{" "}
-            <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-lavender">
-              data/benchmark.json
-            </code>{" "}
-            at build time.
-          </p>
-        </div>
-      </section>
-
-      {hasData && summary ? (
-        <>
-          <section aria-labelledby="summary-heading" className="space-y-3">
-            <SectionHeading id="summary-heading" title="Summary" />
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-              <Stat
-                label="Completed runs"
-                value={String(summary.runs)}
-                hint="Scenarios in this snapshot."
-              />
-              <Stat
-                label="Deal rate"
-                value={pct(summary.deal_rate_pct)}
-                hint="Runs that closed a deal."
-              />
-              <Stat
-                label="Avg. saving vs list"
-                value={pct(summary.avg_saving_vs_list_pct)}
-                hint="Against the winner's list price."
-              />
-              <Stat
-                label="Avg. saving vs cheapest"
-                value={pct(summary.avg_saving_vs_cheapest_list_pct)}
-                hint="Against the lowest list price."
-              />
-              <Stat
-                label="Guard violations"
-                value={String(summary.guard_violations)}
-                hint="Deals that broke a check."
-                tone={summary.guard_violations === 0 ? "positive" : "negative"}
-              />
-            </div>
-          </section>
-
-          <section aria-labelledby="checks-heading" className="space-y-3">
-            <SectionHeading
-              id="checks-heading"
-              title="What every winning deal is checked against"
-            />
-            <div className="grid gap-3 sm:grid-cols-3">
-              {CHECKS.map((check) => (
-                <div
-                  key={check.title}
-                  className="rounded-panel border border-line bg-surface p-5"
-                >
-                  <span className="flex size-8 items-center justify-center rounded-lg border border-lavender-linethin bg-lavender-soft">
-                    <ShieldCheck
-                      className="size-4 text-lavender"
-                      aria-hidden="true"
-                    />
-                  </span>
-                  <h3 className="mt-3 text-sm font-semibold text-ink">
-                    {check.title}
-                  </h3>
-                  <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                    {check.body}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <p className="text-[13px] leading-relaxed text-muted">
-              {failedGuards.length === 0 ? (
-                <span className="inline-flex items-center gap-1.5 text-success">
-                  <Check className="size-3.5" aria-hidden="true" />
-                  All {closedDeals.length} closed{" "}
-                  {closedDeals.length === 1 ? "deal" : "deals"} passed every check.
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-warning">
-                  <CircleSlash className="size-3.5" aria-hidden="true" />
-                  {failedGuards.length} of {closedDeals.length} closed{" "}
-                  {closedDeals.length === 1 ? "deal" : "deals"} failed a check.
-                </span>
-              )}
-            </p>
-          </section>
-
-          <section aria-labelledby="scenarios-heading" className="space-y-3">
-            <SectionHeading
-              id="scenarios-heading"
-              title="Recorded scenarios"
-              description="In run order, in US dollars."
-            />
-
-            <div className="overflow-hidden rounded-panel border border-line bg-surface">
-              {/* Table for wide viewports ---------------------------------- */}
-              <div className="hidden lg:block">
-                <table className="w-full border-collapse text-sm">
-                  <caption className="sr-only">
-                    Benchmark runs with the buyer budget, target price, winning
-                    seller, agreed price, list price, saving against list price
-                    and guard result.
-                  </caption>
-                  <thead>
-                    <tr className="border-b border-line text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-                      <th scope="col" className="px-5 py-3 text-left font-medium">
-                        Run
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right font-medium">
-                        Budget
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right font-medium">
-                        Target
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-left font-medium">
-                        Winner
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right font-medium">
-                        Agreed
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right font-medium">
-                        List
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right font-medium">
-                        Saving
-                      </th>
-                      <th scope="col" className="px-5 py-3 text-right font-medium">
-                        Guard
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line/70">
-                    {runs.map((run, index) => (
-                      <tr key={index} className="align-middle">
-                        <th
-                          scope="row"
-                          className="px-5 py-3 text-left font-mono text-[12px] font-normal text-muted"
-                        >
-                          {String(index + 1).padStart(2, "0")}
-                        </th>
-                        <Cell>{usd.format(run.budget)}</Cell>
-                        <Cell>{usd.format(run.target)}</Cell>
-                        <td className="px-3 py-3 text-ink">
-                          {run.deal && run.seller ? run.seller : <span className="text-muted">—</span>}
-                        </td>
-                        <Cell>
-                          {run.deal && run.price !== undefined
-                            ? usd.format(run.price)
-                            : "—"}
-                        </Cell>
-                        <Cell muted>
-                          {run.deal && run.list_price !== undefined
-                            ? usd.format(run.list_price)
-                            : "—"}
-                        </Cell>
-                        <Cell>
-                          {run.deal && run.saving_vs_list !== undefined ? (
-                            <span className="text-success">
-                              {pct(run.saving_vs_list)}
-                            </span>
-                          ) : (
-                            <span className="text-muted">—</span>
-                          )}
-                        </Cell>
-                        <td className="px-5 py-3 text-right">
-                          <GuardMark run={run} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Stacked list for narrow viewports -------------------------- */}
-              <ul className="divide-y divide-line/70 lg:hidden">
-                {runs.map((run, index) => (
-                  <li key={index} className="px-4 py-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="min-w-0 text-sm font-medium text-ink">
-                        <span className="font-mono text-[12px] font-normal text-muted">
-                          Run {String(index + 1).padStart(2, "0")}
-                        </span>
-                        {run.deal && run.seller ? (
-                          <span className="text-muted"> · {run.seller}</span>
-                        ) : null}
-                      </p>
-                      <GuardMark run={run} />
-                    </div>
-                    <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
-                      <Pair label="Budget" value={usd.format(run.budget)} />
-                      <Pair label="Target" value={usd.format(run.target)} />
-                      {run.deal && run.price !== undefined ? (
-                        <>
-                          <Pair label="Agreed" value={usd.format(run.price)} />
-                          <Pair
-                            label="List"
-                            value={
-                              run.list_price !== undefined
-                                ? usd.format(run.list_price)
-                                : "—"
-                            }
-                            muted
-                          />
-                          <Pair
-                            label="Saving vs list"
-                            value={
-                              run.saving_vs_list !== undefined
-                                ? pct(run.saving_vs_list)
-                                : "—"
-                            }
-                            tone="positive"
-                          />
-                        </>
-                      ) : (
-                        <Pair label="Outcome" value="No deal" muted />
-                      )}
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-
-          <section aria-labelledby="method-heading" className="space-y-3">
-            <SectionHeading id="method-heading" title="Method and caveats" />
-            <div className="grid gap-3 lg:grid-cols-2">
-              <div className="rounded-panel border border-line bg-surface p-5">
-                <h3 className="text-sm font-semibold text-ink">
-                  How each scenario is built
-                </h3>
-                <BulletList items={METHOD} />
-              </div>
-              <div className="rounded-panel border border-line bg-surface p-5">
-                <h3 className="text-sm font-semibold text-ink">
-                  How to read the results
-                </h3>
-                <BulletList items={READING} />
-              </div>
-            </div>
-          </section>
-        </>
-      ) : (
-        <EmptyState
-          title="No benchmark runs recorded"
-          description="Generate a snapshot, then rebuild the frontend to publish it here."
-          action={
-            <code className="rounded-md border border-line bg-surface-2 px-3 py-1.5 font-mono text-[12px] text-lavender">
-              python benchmark.py 10
-            </code>
-          }
-        />
-      )}
-
-      <nav aria-labelledby="next-heading" className="space-y-3">
-        <h2
-          id="next-heading"
-          className="text-[11px] font-medium uppercase tracking-[0.08em] text-lavender"
-        >
-          Where to next
-        </h2>
-        <ul className="grid gap-3 sm:grid-cols-3">
-          {NEXT_LINKS.map((link) => {
-            const Icon = link.icon;
-
-            return (
-              <li key={link.href}>
-                <Link
-                  href={link.href}
-                  className="group flex h-full items-start gap-3 rounded-panel border border-line bg-surface p-4 transition-colors duration-150 hover:border-line-strong hover:bg-surface-2"
-                >
-                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-lavender-linethin bg-lavender-soft">
-                    <Icon className="size-4 text-lavender" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
-                      {link.label}
-                      <ArrowRight
-                        className="size-3.5 text-lavender transition-transform duration-150 group-hover:translate-x-0.5"
-                        aria-hidden="true"
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-[13px] leading-relaxed text-muted">
-                      {link.body}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </div>
-  );
-}
-
-function SectionHeading({
-  id,
-  title,
-  description,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <h2
-        id={id}
-        className="text-lg font-semibold tracking-[-0.01em] text-ink"
-      >
-        {title}
-      </h2>
-      {description ? (
-        <p className="max-w-2xl text-sm leading-relaxed text-muted">
-          {description}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  tone?: "positive" | "negative";
-}) {
-  return (
-    <div className="rounded-panel border border-line bg-surface p-4">
-      <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-        {label}
-      </p>
-      <p
-        className={cn(
-          "mt-2 font-mono text-2xl font-semibold tabular-nums tracking-[-0.01em]",
-          tone === "positive" && "text-success",
-          tone === "negative" && "text-danger",
-          !tone && "text-ink",
-        )}
-      >
-        {value}
-      </p>
-      <p className="mt-1.5 text-[12px] leading-relaxed text-muted">{hint}</p>
-    </div>
-  );
-}
-
-function Cell({
-  children,
-  muted = false,
-}: {
-  children: ReactNode;
-  muted?: boolean;
-}) {
-  return (
-    <td
-      className={cn(
-        "px-3 py-3 text-right font-mono text-[13px] tabular-nums",
-        muted ? "text-muted" : "text-ink",
-      )}
-    >
-      {children}
-    </td>
-  );
-}
-
-function GuardMark({ run }: { run: BenchmarkRun }) {
+function GuardMark({ run }: { run: BenchmarkRow }) {
   if (!run.deal) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-muted">
+      <Badge tone="neutral" dot={false}>
         No deal
-      </span>
+      </Badge>
     );
   }
 
   const passed = run.guard_ok !== false;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        passed ? "bg-success-soft text-success" : "bg-danger-soft text-danger",
-      )}
-    >
-      <span
-        className={cn("size-1.5 rounded-full", passed ? "bg-success" : "bg-danger")}
-        aria-hidden="true"
-      />
-      {passed ? "Passed" : "Failed"}
-    </span>
-  );
+  return <Badge tone={passed ? "success" : "danger"}>{passed ? "Passed" : "Failed"}</Badge>;
 }
 
 function Pair({
@@ -552,18 +420,25 @@ function Pair({
   value,
   muted = false,
   tone,
+  className,
 }: {
   label: string;
   value: string;
   muted?: boolean;
   tone?: "positive";
+  className?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-line/40 pb-1 last:border-0">
-      <dt className="text-[11px] text-muted">{label}</dt>
+    <div
+      className={cn(
+        "flex items-baseline justify-between gap-2 border-b border-line/40 pb-1",
+        className,
+      )}
+    >
+      <dt className="text-[11px] text-faint">{label}</dt>
       <dd
         className={cn(
-          "whitespace-nowrap text-right font-mono text-[12px] tabular-nums",
+          "num whitespace-nowrap text-right text-[12px]",
           muted ? "text-muted" : "text-ink",
           tone === "positive" && "text-success",
         )}
@@ -580,10 +455,10 @@ function BulletList({ items }: { items: string[] }) {
       {items.map((item) => (
         <li key={item} className="flex gap-2.5">
           <span
-            className="mt-[7px] size-1.5 shrink-0 rounded-full bg-lavender"
+            className="mt-[7px] size-1.5 shrink-0 rounded-full bg-accent/70"
             aria-hidden="true"
           />
-          <span className="text-[13px] leading-relaxed text-muted">{item}</span>
+          <span className="text-[12px] leading-relaxed text-muted">{item}</span>
         </li>
       ))}
     </ul>

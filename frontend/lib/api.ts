@@ -120,13 +120,14 @@ export function compilePolicy(rules: string): Promise<CompiledPolicy> {
  */
 export function negotiateUrl(params: NegotiateParams = {}): string {
   const query = new URLSearchParams();
-  const { item, budget, target, policyId, replay } = params;
+  const { item, budget, target, policyId, replay, sellerPrices } = params;
 
   if (item !== undefined) query.set("item", item);
   if (budget !== undefined) query.set("budget", String(budget));
   if (target !== undefined) query.set("target", String(target));
   if (policyId) query.set("policy_id", policyId);
   if (replay) query.set("replay", "true");
+  if (sellerPrices !== undefined) query.set("prices", JSON.stringify(sellerPrices));
 
   const search = query.toString();
   return apiUrl(`/api/negotiate${search ? `?${search}` : ""}`);
