@@ -1,62 +1,28 @@
-import { cn } from "@/lib/cn";
+import { Badge, type BadgeTone } from "./Badge";
 
 /** Deals with the four status values the backend actually returns. */
 export type DealStatus = "negotiated" | "awaiting_approval" | "deposit_paid" | "complete";
 
-export type StatusVariant = "negotiating" | "deal" | "out" | "pending" | "complete" | DealStatus;
+export type StatusVariant =
+  | "negotiating"
+  | "deal"
+  | "out"
+  | "pending"
+  | "complete"
+  | DealStatus;
 
 const variantMap: Record<
   StatusVariant,
-  { label: string; dot: string; bg: string; text: string }
+  { label: string; tone: BadgeTone; pulse?: boolean }
 > = {
-  negotiating: {
-    label: "Negotiating",
-    dot: "bg-accent",
-    bg: "bg-accent-soft",
-    text: "text-accent",
-  },
-  deal: {
-    label: "Deal",
-    dot: "bg-success",
-    bg: "bg-success-soft",
-    text: "text-success",
-  },
-  out: {
-    label: "Out",
-    dot: "bg-danger",
-    bg: "bg-danger-soft",
-    text: "text-danger",
-  },
-  pending: {
-    label: "Pending",
-    dot: "bg-warning",
-    bg: "bg-warning-soft",
-    text: "text-warning",
-  },
-  complete: {
-    label: "Complete",
-    dot: "bg-info",
-    bg: "bg-info-soft",
-    text: "text-info",
-  },
-  negotiated: {
-    label: "Ready",
-    dot: "bg-accent",
-    bg: "bg-accent-soft",
-    text: "text-accent",
-  },
-  awaiting_approval: {
-    label: "Waiting on approval",
-    dot: "bg-warning",
-    bg: "bg-warning-soft",
-    text: "text-warning",
-  },
-  deposit_paid: {
-    label: "Deposit paid",
-    dot: "bg-info",
-    bg: "bg-info-soft",
-    text: "text-info",
-  },
+  negotiating: { label: "Negotiating", tone: "accent", pulse: true },
+  deal: { label: "Deal reached", tone: "success" },
+  out: { label: "Out", tone: "danger" },
+  pending: { label: "Pending", tone: "warning" },
+  complete: { label: "Paid in full", tone: "success" },
+  negotiated: { label: "Ready to pay", tone: "accent" },
+  awaiting_approval: { label: "Awaiting approval", tone: "warning" },
+  deposit_paid: { label: "Deposit paid", tone: "info" },
 };
 
 /**
@@ -74,16 +40,8 @@ export function StatusBadge({
   const styles = variantMap[variant];
 
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium",
-        styles.bg,
-        styles.text,
-        className,
-      )}
-    >
-      <span className={cn("size-1.5 rounded-full", styles.dot)} aria-hidden="true" />
+    <Badge tone={styles.tone} pulse={styles.pulse} className={className}>
       {styles.label}
-    </span>
+    </Badge>
   );
 }

@@ -4,32 +4,16 @@ import { cn } from "@/lib/cn";
 export function Panel({
   children,
   className,
-  action,
 }: {
   children: ReactNode;
   className?: string;
-  action?: ReactNode;
 }) {
-  return (
-    <div
-      className={cn(
-        "rounded-panel border border-line bg-surface overflow-hidden",
-        className,
-      )}
-    >
-      {action ? (
-        <div className="flex items-center justify-between border-b border-line px-5 py-3">
-          <div className="text-sm font-medium text-ink">{action}</div>
-        </div>
-      ) : null}
-      <div className="p-5">{children}</div>
-    </div>
-  );
+  return <div className={cn("card", className)}>{children}</div>;
 }
 
 /**
- * Heading-only panel variant for putting a title, description and actions on a
- * clean surface before a content block.
+ * Heading block for a panel. `bodyClassName` lets a panel pass padding through
+ * to the content below the header.
  */
 export function PanelHeader({
   eyebrow,
@@ -37,30 +21,33 @@ export function PanelHeader({
   description,
   action,
   className,
+  bodyClassName,
 }: {
   eyebrow?: string;
   title?: string;
   description?: string;
   action?: ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 border-b border-line px-5 py-4 last:border-0",
+        "flex flex-col gap-2 border-b border-line px-5 py-4",
+        bodyClassName,
         className,
       )}
     >
-      {eyebrow ? (
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-lavender">
-          {eyebrow}
-        </p>
-      ) : null}
-      {title ? <h3 className="text-lg font-semibold tracking-[-0.01em] text-ink">{title}</h3> : null}
-      {description ? (
-        <p className="text-sm leading-relaxed text-muted">{description}</p>
-      ) : null}
-      {action ? <div className="pt-1">{action}</div> : null}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          {eyebrow ? <p className="label mb-1 text-accent">{eyebrow}</p> : null}
+          {title ? (
+            <h3 className="text-h3 font-semibold text-ink">{title}</h3>
+          ) : null}
+        </div>
+        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      </div>
+      {description ? <p className="text-small text-muted">{description}</p> : null}
     </div>
   );
 }

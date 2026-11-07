@@ -21,12 +21,12 @@ export const metadata: Metadata = {
     template: "%s · Haggle",
   },
   description:
-    "An AI buyer agent negotiates price and payment terms with competing seller agents, then settles the winning deal through PayPal.",
+    "One buyer agent negotiates with every seller at once, then settles the best deal through PayPal.",
   applicationName: "Haggle",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#070a0f",
+  themeColor: "#08080c",
   colorScheme: "dark",
 };
 

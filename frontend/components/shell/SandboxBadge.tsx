@@ -13,13 +13,13 @@ export function SandboxBadge({
     <span
       title="Payments run against the PayPal sandbox. No real money moves."
       className={cn(
-        "inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-lavender",
+        "inline-flex shrink-0 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-warning",
         variant === "chip" &&
-          "h-6 rounded-md border border-lavender-linethin bg-lavender-soft px-2",
+          "h-7 rounded-pill border border-warning-line bg-warning-soft px-2.5",
         className,
       )}
     >
-      <span className="size-1.5 rounded-full bg-lavender" aria-hidden="true" />
+      <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
       Sandbox
     </span>
   );
