@@ -1,473 +1,306 @@
-"use client";
+import type { Metadata } from "next";
+import {
+  ArrowRight,
+  BadgeCheck,
+  Bot,
+  CircleDollarSign,
+  Gavel,
+  Play,
+  ShieldCheck,
+  Sparkles,
+  Timer,
+  WalletCards,
+} from "lucide-react";
+import { ButtonLink } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { useNegotiation } from "@/lib/useNegotiation";
-import { payDeal } from "@/lib/api";
-import type { NegotiationEvent } from "@/lib/types";
-
-const COLORS = ["#f59e0b", "#34d399", "#a78bfa", "#38bdf8"];
-const MAX_ROUND = 5;
-
-type Msg = {
-  who: "buyer" | "seller";
-  price: number;
-  deposit: number;
-  days: number;
-  message: string;
-  round: number;
+export const metadata: Metadata = {
+  title: "Overview",
+  description:
+    "One buyer agent negotiates with every seller at once, then settles the best deal through PayPal.",
 };
 
-type Lane = {
-  name: string;
-  color: string;
-  msgs: Msg[];
-  pts: { round: number; price: number }[];
-};
+const STEPS = [
+  {
+    icon: Gavel,
+    title: "Set your mandate",
+    body: "Name the item, your budget and the price you want. The agent never negotiates past those limits.",
+  },
+  {
+    icon: Bot,
+    title: "Agents haggle in parallel",
+    body: "Every seller is approached at once. Your agent uses real competing offers as leverage, round after round.",
+  },
+  {
+    icon: BadgeCheck,
+    title: "The best offer wins",
+    body: "Offers are ranked on price, deposit and delivery. The deal that costs you least overall takes the win.",
+  },
+  {
+    icon: WalletCards,
+    title: "Pay the deposit, settle on delivery",
+    body: "Approve once in PayPal. The deposit is captured up front and the balance only after you confirm delivery.",
+  },
+];
 
-function money(n: number): string {
-  return "$" + n.toFixed(2);
-}
-
-/** Folds the raw event stream into one lane per seller. Handles the `reset`
- *  event, which the hook does not apply to the offer list. */
-function buildLanes(events: NegotiationEvent[]): Lane[] {
-  const lanes: Lane[] = [];
-  let round = 0;
-  for (const e of events) {
-    if (e.type === "round") {
-      round = e.n;
-    } else if (e.type === "reset") {
-      lanes.length = 0;
-      round = 0;
-    } else if (e.type === "offer") {
-      let lane = lanes.find((l) => l.name === e.seller);
-      if (!lane) {
-        lane = { name: e.seller, color: COLORS[lanes.length % COLORS.length], msgs: [], pts: [] };
-        lanes.push(lane);
-      }
-      lane.msgs.push({
-        who: e.who,
-        price: e.price,
-        deposit: e.deposit_percent,
-        days: e.delivery_days,
-        message: e.message,
-        round,
-      });
-      if (e.who === "seller") lane.pts.push({ round, price: e.price });
-    }
-  }
-  return lanes;
-}
-
-function LaneFeed({ msgs }: { msgs: Msg[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs.length]);
+export default function OverviewPage() {
   return (
-    <div ref={ref} className="flex h-64 flex-col gap-2 overflow-y-auto pr-1">
-      {msgs.map((m, i) => (
+    <div className="space-y-10">
+      {/* Hero ---------------------------------------------------------- */}
+      <section className="relative overflow-hidden rounded-card border border-line bg-surface shadow-card">
         <div
-          key={i}
-          className={
-            m.who === "buyer"
-              ? "max-w-[92%] self-end rounded-2xl rounded-br-sm bg-cyan-500/15 px-3 py-2 text-sm"
-              : "max-w-[92%] self-start rounded-2xl rounded-bl-sm bg-white/[0.06] px-3 py-2 text-sm"
-          }
-        >
-          <div className="mb-0.5 text-[11px] uppercase tracking-wide text-white/50">
-            {m.who === "buyer" ? "Your agent" : "Seller"} · {money(m.price)} · {Math.round(m.deposit)}% deposit · {m.days}d
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-grid opacity-60 [mask-image:radial-gradient(90%_80%_at_50%_0%,black,transparent)]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-24 -top-40 size-[520px] rounded-full bg-accent/15 blur-[110px]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-24 bottom-0 size-[420px] rounded-full bg-success/10 blur-[120px]"
+        />
+
+        <div className="relative grid items-center gap-10 p-6 sm:p-9 lg:grid-cols-[1.03fr_0.97fr] lg:p-12 xl:gap-14">
+          <div className="max-w-xl">
+            <Badge tone="accent" className="mb-5 border-accent-line bg-accent-soft">
+              <Sparkles className="size-3" aria-hidden="true" />
+              AI negotiation, settled with PayPal
+            </Badge>
+            <h1 className="text-[40px] font-semibold leading-[1.02] tracking-[-0.04em] text-ink sm:text-[54px]">
+              Let your agent
+              <span className="block bg-gradient-to-r from-accent-hover via-accent to-info bg-clip-text text-transparent">
+                do the haggling.
+              </span>
+            </h1>
+            <p className="mt-5 max-w-lg text-[15px] leading-relaxed text-muted sm:text-base">
+              One buyer agent. Every seller at once. Watch prices come down in real time,
+              then settle the winning deal without leaving the page.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center gap-4">
+              <ButtonLink href="/trading-floor" size="lg" className="group">
+                <Play className="size-4 fill-current" aria-hidden="true" />
+                Watch a negotiation
+                <ArrowRight
+                  className="size-4 transition-transform duration-150 group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                />
+              </ButtonLink>
+              <span className="inline-flex items-center gap-2 text-small text-faint">
+                <Timer className="size-3.5" aria-hidden="true" />
+                About 30 seconds
+              </span>
+            </div>
+
+            <p className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro text-faint">
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldCheck className="size-3.5 text-success" aria-hidden="true" />
+                PayPal sandbox
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>No sign-up</span>
+              <span aria-hidden="true">·</span>
+              <span>No real money moves</span>
+            </p>
           </div>
-          <div className="text-white/90">{m.message}</div>
+
+          <HeroPreview />
         </div>
-      ))}
-    </div>
-  );
-}
+      </section>
 
-function PriceChart({ lanes, target }: { lanes: Lane[]; target: number }) {
-  const all = lanes.flatMap((l) => l.pts.map((p) => p.price));
-  if (all.length < 2) return null;
-  const W = 720;
-  const H = 240;
-  const L = 48;
-  const R = 16;
-  const T = 16;
-  const B = 28;
-  const lo = Math.floor(Math.min(...all, target) - 3);
-  const hi = Math.ceil(Math.max(...all, target) + 3);
-  const x = (r: number) => L + (r / MAX_ROUND) * (W - L - R);
-  const y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-  const label = "rgba(255,255,255,0.5)";
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full">
-        {[0, 1, 2, 3, 4, 5].map((r) => (
-          <text key={r} x={x(r)} y={H - 8} fill={label} fontSize="12" textAnchor="middle">
-            {r === 0 ? "Open" : "R" + r}
-          </text>
-        ))}
-        <text x="6" y={y(hi) + 4} fill={label} fontSize="12">${hi}</text>
-        <text x="6" y={y(lo) + 4} fill={label} fontSize="12">${lo}</text>
-        <line x1={L} x2={W - R} y1={y(target)} y2={y(target)} stroke="#38bdf8" strokeDasharray="6 5" />
-        <text x={W - R} y={y(target) - 6} fill="#38bdf8" fontSize="12" textAnchor="end">
-          Your target {money(target)}
-        </text>
-        {lanes.map((l) =>
-          l.pts.length === 0 ? null : (
-            <g key={l.name}>
-              <polyline
-                fill="none"
-                stroke={l.color}
-                strokeWidth="3"
-                strokeLinejoin="round"
-                points={l.pts.map((p) => `${x(p.round)},${y(p.price)}`).join(" ")}
-              />
-              <circle
-                cx={x(l.pts[l.pts.length - 1].round)}
-                cy={y(l.pts[l.pts.length - 1].price)}
-                r="5"
-                fill={l.color}
-              />
-            </g>
-          ),
-        )}
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-4 text-sm text-white/70">
-        {lanes.map((l) => (
-          <span key={l.name} className="flex items-center gap-2">
-            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: l.color }} />
-            {l.name}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const INPUT =
-  "w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-white outline-none focus:border-violet-400";
-
-export default function TradingFloorPage() {
-  const [state, control] = useNegotiation();
-  const [item, setItem] = useState("a 27-inch monitor");
-  const [budget, setBudget] = useState("90");
-  const [target, setTarget] = useState("85");
-  const [replay, setReplay] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [run, setRun] = useState<{ target: number } | null>(null);
-  const [paying, setPaying] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
-
-  const events = state.events as unknown as NegotiationEvent[];
-  const lanes = useMemo(() => buildLanes(events), [events]);
-
-  const notice = useMemo(() => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.type === "notice") return e.message;
-    }
-    return null;
-  }, [events]);
-
-  const serverError = useMemo(() => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.type === "error") return e.message;
-    }
-    return null;
-  }, [events]);
-
-  const result = state.result;
-  const winner = result?.winner ?? null;
-  const running =
-    (state.connectionStatus === "connecting" || state.connectionStatus === "open") && result === null;
-  const dealId = state.deal?.deal_id ?? result?.deal_id ?? null;
-  const alreadyPaid = state.deal !== null && state.deal.status !== "negotiated";
-
-  function start() {
-    const b = Number(budget);
-    const t = Number(target);
-    if (!item.trim()) {
-      setFormError("Describe what you want to buy.");
-      return;
-    }
-    if (!(b > 0) || !(t > 0) || t > b) {
-      setFormError("The target must be above $0 and not above the budget.");
-      return;
-    }
-    setFormError(null);
-    setPayError(null);
-    setRun({ target: t });
-    void control.startNegotiation({ item: item.trim(), budget: b, target: t, replay });
-  }
-
-  async function pay() {
-    if (!dealId) return;
-    setPaying(true);
-    setPayError(null);
-    try {
-      const r = await payDeal(dealId);
-      window.location.href = r.approve_url;
-    } catch (err) {
-      setPayError(err instanceof Error ? err.message : String(err));
-      setPaying(false);
-    }
-  }
-
-  function badge(name: string): { label: string; cls: string; dim: boolean } {
-    const s = state.sellerStatuses[name];
-    if (result) {
-      if (winner && winner.seller === name)
-        return { label: "Winner", cls: "bg-emerald-400/20 text-emerald-300", dim: false };
-      if (s === "deal") return { label: "Not selected", cls: "bg-white/10 text-white/60", dim: true };
-      return { label: "Out", cls: "bg-rose-400/15 text-rose-300", dim: true };
-    }
-    if (s === "deal") return { label: "Deal reached", cls: "bg-emerald-400/15 text-emerald-300", dim: false };
-    if (s === "out") return { label: "Out", cls: "bg-rose-400/15 text-rose-300", dim: true };
-    return { label: running ? "Negotiating" : "Waiting", cls: "bg-violet-400/15 text-violet-300", dim: false };
-  }
-
-  const statusText = (() => {
-    if (state.connectionStatus === "connecting") return "Connecting to sellers...";
-    if (running) {
-      return state.currentRound === 0
-        ? "Sellers are posting opening offers"
-        : `Round ${state.currentRound} of ${MAX_ROUND}`;
-    }
-    if (result) return "Negotiation finished";
-    return "";
-  })();
-
-  const depositAmount = winner
-    ? (state.deal?.deposit ?? (winner.price * winner.deposit_percent) / 100)
-    : 0;
-  const balanceAmount = winner ? (state.deal?.balance ?? winner.price - depositAmount) : 0;
-  const saved = winner && result?.list_price ? result.list_price - winner.price : 0;
-  const savedPct = winner && result?.list_price ? (saved / result.list_price) * 100 : 0;
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-widest text-violet-300">Trading Floor</div>
-        <h1 className="mt-1 text-3xl font-bold text-white">Watch your agent negotiate</h1>
-        <p className="mt-1 text-white/60">
-          One buyer agent haggles with every seller at once, then the best deal is paid through PayPal.
-        </p>
-      </div>
-
-      {/* Mandate bar */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <div className="grid items-end gap-3 md:grid-cols-[2fr_1fr_1fr_auto]">
-          <label className="text-sm text-white/60">
-            What do you want to buy?
-            <input className={INPUT + " mt-1"} value={item} onChange={(e) => setItem(e.target.value)} />
-          </label>
-          <label className="text-sm text-white/60">
-            Maximum budget ($)
-            <input
-              className={INPUT + " mt-1"}
-              type="number"
-              min="1"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </label>
-          <label className="text-sm text-white/60">
-            Target price ($)
-            <input
-              className={INPUT + " mt-1"}
-              type="number"
-              min="1"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              onClick={start}
-              disabled={running}
-              className="rounded-lg bg-violet-500 px-5 py-2 font-semibold text-white hover:bg-violet-400 disabled:opacity-50"
-            >
-              {result ? "Negotiate again" : "Start negotiation"}
-            </button>
-            {running && (
-              <button
-                onClick={control.stopListening}
-                className="rounded-lg border border-white/15 px-4 py-2 text-white/80 hover:bg-white/5"
-              >
-                Stop watching
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <label className="flex items-center gap-2 text-white/60">
-            <input type="checkbox" checked={replay} onChange={(e) => setReplay(e.target.checked)} />
-            Use a recorded negotiation (instant, no AI calls)
-          </label>
-          <span className="text-white/60">{statusText}</span>
-        </div>
-        {running && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full bg-violet-400 transition-all"
-              style={{ width: `${Math.min(100, (state.currentRound / MAX_ROUND) * 100)}%` }}
-            />
-          </div>
-        )}
-        {formError && <p className="mt-3 text-sm text-rose-300">{formError}</p>}
-      </div>
-
-      {/* Banners */}
-      {notice && (
-        <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-amber-200">
-          {notice}
-        </div>
-      )}
-      {(state.error || serverError) && (
-        <div className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-rose-200">
-          Something went wrong: {state.error ?? serverError}. Try again, or tick the recorded negotiation option.
-        </div>
-      )}
-
-      {/* Outcome */}
-      {result && winner && (
-        <div className="rounded-2xl border border-emerald-400/50 bg-emerald-400/[0.07] p-5">
-          <div className="text-xs font-semibold uppercase tracking-widest text-emerald-300">Best deal found</div>
-          <h2 className="mt-1 text-2xl font-bold text-white">
-            {winner.seller} wins at {money(winner.price)}
-          </h2>
-          <p className="mt-1 text-white/70">
-            {saved > 0
-              ? `You save ${money(saved)} (${savedPct.toFixed(1)}%) off its list price. `
-              : ""}
-            {Math.round(winner.deposit_percent)}% deposit, delivered in {winner.delivery_days} days.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {alreadyPaid && dealId ? (
-              <Link
-                href={`/receipt?deal=${dealId}`}
-                className="rounded-lg bg-emerald-500 px-5 py-2.5 font-semibold text-emerald-950 hover:bg-emerald-400"
-              >
-                View receipt
-              </Link>
-            ) : (
-              <button
-                onClick={pay}
-                disabled={!dealId || paying}
-                className="rounded-lg bg-emerald-500 px-5 py-2.5 font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
-              >
-                {paying ? "Opening PayPal..." : `Pay ${money(depositAmount)} deposit with PayPal`}
-              </button>
-            )}
-            <span className="text-sm text-white/60">
-              The remaining {money(balanceAmount)} is released when you confirm delivery.
-            </span>
-          </div>
-          {payError && <p className="mt-3 text-sm text-rose-300">{payError}</p>}
-        </div>
-      )}
-      {result && !winner && (
-        <div className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-rose-200">
-          No seller could meet your limits. Try a higher budget or a later target.
-        </div>
-      )}
-
-      {/* Seller lanes */}
-      {lanes.length > 0 ? (
-        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
-          {lanes.map((lane) => {
-            const b = badge(lane.name);
-            const isWinner = winner?.seller === lane.name;
-            const last = lane.pts[lane.pts.length - 1];
-            const prev = lane.pts.length > 1 ? lane.pts[lane.pts.length - 2] : null;
-            const drop = last && prev ? prev.price - last.price : 0;
+      {/* How it works -------------------------------------------------- */}
+      <section aria-labelledby="how-heading">
+        <SectionHeader
+          eyebrow="How it works"
+          title="From mandate to delivery in four steps"
+          description="A complete purchase, negotiated and settled in one sitting."
+        />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {STEPS.map((step, index) => {
+            const Icon = step.icon;
             return (
-              <div
-                key={lane.name}
-                className={
-                  "flex flex-col gap-3 rounded-2xl border p-4 " +
-                  (isWinner ? "border-emerald-400/70 bg-emerald-400/[0.06]" : "border-white/10 bg-white/[0.03]") +
-                  (b.dim ? " opacity-60" : "")
-                }
-              >
+              <div key={step.title} className="card group p-5 transition-colors hover:border-line-strong">
                 <div className="flex items-center justify-between">
-                  <span className="text-lg font-semibold" style={{ color: lane.color }}>
-                    {lane.name}
+                  <span className="grid size-10 place-items-center rounded-panel border border-line bg-surface-2 text-accent transition-colors group-hover:border-accent-line group-hover:bg-accent-soft">
+                    <Icon className="size-[18px]" aria-hidden="true" />
                   </span>
-                  <span className={"rounded-full px-2.5 py-0.5 text-xs font-medium " + b.cls}>{b.label}</span>
+                  <span className="num text-micro text-faint">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
                 </div>
-                <div>
-                  <div className="text-4xl font-bold text-white">{last ? money(last.price) : "-"}</div>
-                  <div className="mt-1 h-5 text-sm text-emerald-300">
-                    {drop > 0 ? `Lowered ${money(drop)} since last round` : ""}
-                  </div>
-                </div>
-                <LaneFeed msgs={lane.msgs} />
+                <h3 className="mt-4 text-h3 font-semibold text-ink">{step.title}</h3>
+                <p className="mt-1.5 text-small leading-relaxed text-muted">{step.body}</p>
               </div>
             );
           })}
         </div>
-      ) : (
-        !running &&
-        !state.error && (
-          <div className="rounded-2xl border border-dashed border-white/15 p-10 text-center text-white/60">
-            Press Start negotiation to watch your agent work with every seller at once.
+      </section>
+
+      {/* About --------------------------------------------------------- */}
+      <section aria-labelledby="about-heading" className="card p-6 sm:p-8">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="label mb-2 text-accent">About this demo</p>
+            <h2 id="about-heading" className="text-h2 font-semibold text-ink">
+              Honest by design
+            </h2>
           </div>
-        )
-      )}
-
-      {/* Chart */}
-      {lanes.some((l) => l.pts.length > 1) && (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <h2 className="mb-3 font-semibold text-white">How each seller price came down</h2>
-          <PriceChart lanes={lanes} target={run?.target ?? Number(target)} />
-        </div>
-      )}
-
-      {/* Offer comparison */}
-      {result && result.ranking.length > 0 && (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <h2 className="font-semibold text-white">Final offers compared</h2>
-          <p className="mb-3 text-sm text-white/60">
-            Ranked by a score that adds the cost of the deposit and the wait for delivery to the price. Lower is better.
+          <p className="max-w-md text-small leading-relaxed text-faint">
+            Built for the PayPal AI Hackathon. Everything below is here so the demo never
+            overpromises.
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-white/50">
-                <tr>
-                  <th className="py-2 pr-4 font-medium">Seller</th>
-                  <th className="py-2 pr-4 font-medium">Price</th>
-                  <th className="py-2 pr-4 font-medium">Deposit</th>
-                  <th className="py-2 pr-4 font-medium">Delivery</th>
-                  <th className="py-2 font-medium">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.ranking.map((r, i) => (
-                  <tr key={r.seller} className="border-t border-white/10 text-white/90">
-                    <td className="py-2 pr-4">
-                      {r.seller}
-                      {i === 0 && (
-                        <span className="ml-2 rounded-full bg-emerald-400/20 px-2 py-0.5 text-xs text-emerald-300">
-                          Winner
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4">{money(r.price)}</td>
-                    <td className="py-2 pr-4">{Math.round(r.deposit_percent)}%</td>
-                    <td className="py-2 pr-4">{r.delivery_days} days</td>
-                    <td className="py-2">{r.score.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
-      )}
+
+        <div className="mt-6 grid gap-x-8 gap-y-5 border-t border-line pt-6 sm:grid-cols-2">
+          {[
+            {
+              icon: ShieldCheck,
+              title: "Sandbox payments",
+              body: "PayPal runs in sandbox mode end to end. No real money moves, and no live account is charged.",
+            },
+            {
+              icon: Bot,
+              title: "Simulated sellers",
+              body: "The default seller agents use sample catalogs. The Seller Policy console shows how a real merchant would join.",
+            },
+            {
+              icon: CircleDollarSign,
+              title: "Recorded benchmark",
+              body: "Benchmark figures come from a fixed set of recorded negotiations, not a live market sample.",
+            },
+            {
+              icon: Timer,
+              title: "Session memory",
+              body: "Deals and compiled policies stay available for this demo session. They are not a permanent record.",
+            },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.title} className="flex gap-3">
+                <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-control border border-line bg-surface-2 text-faint">
+                  <Icon className="size-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h3 className="text-[13px] font-semibold text-ink">{item.title}</h3>
+                  <p className="mt-0.5 text-small leading-relaxed text-muted">{item.body}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-6 border-t border-line pt-5 text-micro leading-relaxed text-faint">
+          Payments run in the PayPal sandbox. No real money moves.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+/** A static, clearly-labelled example of the live negotiation screen. */
+function HeroPreview() {
+  const sellers = [
+    { name: "Firm Co", from: "$105.00", to: "$95.00", color: "var(--color-seller-1)" },
+    { name: "Flex Ltd", from: "$98.00", to: "$88.00", color: "var(--color-seller-2)" },
+    { name: "Premium Hub", from: "$118.00", to: "$102.00", color: "var(--color-seller-3)" },
+  ];
+
+  return (
+    <div className="relative mx-auto w-full max-w-[470px]">
+      <div
+        aria-hidden="true"
+        className="absolute -inset-4 rounded-[26px] bg-accent/10 blur-2xl"
+      />
+      <div className="card-glass relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
+              <span className="relative inline-flex size-2 rounded-full bg-success" />
+            </span>
+            <span className="text-micro font-semibold uppercase tracking-[0.12em] text-faint">
+              Example negotiation
+            </span>
+          </div>
+          <span className="num rounded-pill border border-line bg-surface-2 px-2 py-0.5 text-[10px] text-muted">
+            Round 3 / 5
+          </span>
+        </div>
+
+        <div className="space-y-2 p-4">
+          {sellers.map((seller, index) => {
+            const winner = index === 1;
+            return (
+              <div
+                key={seller.name}
+                className={
+                  winner
+                    ? "flex items-center gap-3 rounded-panel border border-success-line bg-success-soft px-3 py-2.5"
+                    : "flex items-center gap-3 rounded-panel border border-line bg-surface-2/60 px-3 py-2.5"
+                }
+              >
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: seller.color }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                  {seller.name}
+                </span>
+                <span className="num text-[11px] text-faint line-through">{seller.from}</span>
+                <span
+                  className={
+                    winner
+                      ? "num text-[15px] font-semibold text-success"
+                      : "num text-[15px] font-semibold text-ink"
+                  }
+                >
+                  {seller.to}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mx-4 rounded-panel border border-line bg-surface px-3 pb-2 pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-micro text-faint">Prices coming down</span>
+            <span className="inline-flex items-center gap-1 text-micro font-medium text-success">
+              <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+              One deal reached
+            </span>
+          </div>
+          <svg viewBox="0 0 400 96" className="mt-1 h-24 w-full" role="img" aria-label="Example price chart: three seller prices falling across three rounds">
+            <defs>
+              <linearGradient id="hero-area" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-success)" stopOpacity="0.28" />
+                <stop offset="100%" stopColor="var(--color-success)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <line x1="10" x2="390" y1="66" y2="66" stroke="var(--color-accent)" strokeDasharray="5 5" strokeOpacity="0.55" />
+            <path d="M10 18 L138 38 L266 56 L390 56 L390 96 L10 96 Z" fill="url(#hero-area)" />
+            <path d="M10 18 L138 38 L266 56 L390 56" fill="none" stroke="var(--color-success)" strokeWidth="2.5" strokeLinecap="round" />
+            <path d="M10 34 L138 50 L266 66 L390 76" fill="none" stroke="var(--color-seller-1)" strokeWidth="1.8" strokeOpacity="0.75" strokeLinecap="round" />
+            <path d="M10 10 L138 30 L266 52 L390 70" fill="none" stroke="var(--color-seller-3)" strokeWidth="1.8" strokeOpacity="0.6" strokeLinecap="round" />
+            <circle cx="390" cy="56" r="3.5" fill="var(--color-success)" />
+          </svg>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
+          <div>
+            <p className="text-micro text-faint">Winner</p>
+            <p className="text-[13px] font-medium text-ink">
+              Flex Ltd · <span className="num text-success">$88.00</span>
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-control bg-success px-3 py-1.5 text-[12px] font-semibold text-[#04150d] shadow-[0_8px_20px_-10px_var(--color-success)]">
+            Deal reached
+            <BadgeCheck className="size-3.5" aria-hidden="true" />
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
