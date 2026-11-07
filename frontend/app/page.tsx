@@ -80,7 +80,7 @@ export default function OverviewPage() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
-              <ButtonLink href="/trading-floor" size="lg" className="group">
+              <ButtonLink href="/trading-floor" size="md" className="group">
                 <Play className="size-4 fill-current" aria-hidden="true" />
                 Watch a negotiation
                 <ArrowRight
