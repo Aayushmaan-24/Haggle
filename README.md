@@ -2,6 +2,9 @@
 
 **An AI buyer agent that negotiates price and payment terms with competing seller agents, then settles the winning deal through PayPal.**
 
+![Trading floor](screenshots/trading_floor_default.png)
+
+
 Built for the PayPal AI Hackathon ("Build What's Next with PayPal and AI"). Tags: Web, Machine Learning/AI, Low/No Code.
 
 - **Live demo:** https://haggle-5xmi.onrender.com (free hosting tier: the first load after idle can take about a minute)
@@ -25,6 +28,15 @@ Built for the PayPal AI Hackathon ("Build What's Next with PayPal and AI"). Tags
 - **Seller Policy:** the no-code console that compiles plain-English rules into a seller agent
 - **Benchmark:** recorded results of randomized purchases
 - **Receipt:** agreed terms and the deposit and balance status of a deal
+
+## Screenshots
+
+![All Sellers Negotiating](screenshots/all_sellers_negotiation.png)
+![Negotiation graph](screenshots/negotiation_graph.png)
+![Winner seller](screenshots/winner_seller.png)
+![Deposit paid](screenshots/deposit_paid.png)
+![All debt cleared](screenshots/all_debt_cleared.png)
+
 
 ## Why the agents are safe
 
