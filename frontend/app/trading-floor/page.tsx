@@ -33,13 +33,18 @@ import {
   forgetPolicy,
   setSelectedPolicyId,
   useSavedPolicies,
-  useSelectedPolicyId,
 } from "@/lib/policyStore";
 import {
   forgetProduct,
   rememberProduct,
   useSavedProducts,
 } from "@/lib/productStore";
+import {
+  clearSetup,
+  loadSetup,
+  saveSetup,
+  type TradingSetup,
+} from "@/lib/setupStore";
 import { cn } from "@/lib/cn";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -124,6 +129,36 @@ function sellerPriceInputsFor(product: Product): Record<string, SellerPriceInput
         },
       ];
     }),
+  );
+}
+
+/** Session storage only needs list/floor; delivery stays a market default. */
+function setupSellerPrices(
+  inputs: Record<string, SellerPriceInput>,
+): TradingSetup["sellerPrices"] {
+  return Object.fromEntries(
+    SELLER_NAMES.map((name) => [
+      name,
+      {
+        list: inputs[name]?.list ?? "",
+        floor: inputs[name]?.floor ?? "",
+      },
+    ]),
+  );
+}
+
+function sellerPriceInputsFromSetup(
+  prices: TradingSetup["sellerPrices"],
+): Record<string, SellerPriceInput> {
+  return Object.fromEntries(
+    SELLER_NAMES.map((name) => [
+      name,
+      {
+        list: prices[name]?.list ?? "",
+        floor: prices[name]?.floor ?? "",
+        delivery: SELLER_DELIVERY[name] ?? "4",
+      },
+    ]),
   );
 }
 
@@ -245,9 +280,10 @@ const INPUT_ERROR = "border-danger-line";
 export default function TradingFloorPage() {
   const [state, control] = useNegotiation();
   const savedPolicies = useSavedPolicies();
-  const selectedPolicyId = useSelectedPolicyId();
-  const selectedPolicy = savedPolicies.find((item) => item.policy_id === selectedPolicyId) ?? null;
   const savedProducts = useSavedProducts();
+  const [activePolicyId, setActivePolicyId] = useState("");
+  const selectedPolicy =
+    savedPolicies.find((item) => item.policy_id === activePolicyId) ?? null;
 
   const [item, setItem] = useState(FALLBACK_PRODUCT.item);
   const [budget, setBudget] = useState(String(FALLBACK_PRODUCT.budget));
@@ -272,6 +308,8 @@ export default function TradingFloorPage() {
   const [customNotice, setCustomNotice] = useState<string | null>(null);
   const [runSignature, setRunSignature] = useState<string | null>(null);
   const [runProductName, setRunProductName] = useState("");
+  const [persistSetup, setPersistSetup] = useState(false);
+  const restoreAttemptedRef = useRef(false);
   const productSelectRef = useRef<HTMLSelectElement>(null);
   const customNameRef = useRef<HTMLInputElement>(null);
 
@@ -324,6 +362,107 @@ export default function TradingFloorPage() {
       cancelled = true;
     };
   }, [productsAttempt]);
+
+  // Wait for the catalog before validating a stored product. This effect is
+  // intentionally after mount so the static export and first client render match.
+  useEffect(() => {
+    if (productsStatus === "loading") return;
+
+    let cancelled = false;
+
+    // Defer the synchronous sessionStorage read by one microtask so hydration
+    // finishes before any persisted values replace the static defaults.
+    queueMicrotask(() => {
+      if (cancelled || restoreAttemptedRef.current) return;
+      restoreAttemptedRef.current = true;
+
+      const stored = loadSetup();
+      if (!stored) return;
+
+      const catalogProduct = products.find(
+        (product) => product.id === stored.productId,
+      );
+      const savedProduct = savedProducts.find(
+        (product) => product.id === stored.productId,
+      );
+      const customDraft = stored.productId === CUSTOM_PRODUCT_ID;
+      const productExists =
+        customDraft || Boolean(catalogProduct) || Boolean(savedProduct);
+      const validPolicyId =
+        stored.policyId &&
+        savedPolicies.some((policy) => policy.policy_id === stored.policyId)
+          ? stored.policyId
+          : "";
+
+      if (!productExists) {
+        const monitor =
+          products.find((product) => product.id === FALLBACK_PRODUCT.id) ??
+          FALLBACK_PRODUCT;
+        setSelectedProductId(monitor.id);
+        setItem(monitor.item);
+        setBudget(String(monitor.budget));
+        setTarget(String(monitor.target));
+        setCustomName("");
+        setSellerPrices(sellerPriceInputsFor(monitor));
+        setSellerPricesOpen(false);
+        setCustomNotice(null);
+        setReplay(stored.replay);
+        setActivePolicyId(validPolicyId);
+        setSelectedPolicyId(validPolicyId);
+        setTouched({});
+        setPersistSetup(true);
+        return;
+      }
+
+      setSelectedProductId(stored.productId);
+      setItem(stored.item);
+      setBudget(stored.budget);
+      setTarget(stored.target);
+      setCustomName(stored.customProduct?.name ?? savedProduct?.name ?? "");
+      setSellerPrices(sellerPriceInputsFromSetup(stored.sellerPrices));
+      setSellerPricesOpen(false);
+      setCustomNotice(null);
+      setReplay(stored.replay);
+      setActivePolicyId(validPolicyId);
+      setSelectedPolicyId(validPolicyId);
+      setTouched({});
+      setPersistSetup(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [productsStatus, products, savedProducts, savedPolicies]);
+
+  // Save after the restore has settled; reset pauses this until the buyer
+  // changes the default setup again.
+  useEffect(() => {
+    if (!persistSetup) return;
+
+    saveSetup({
+      productId: selectedProductId,
+      customProduct: customMode
+        ? { id: selectedProductId, name: customName }
+        : null,
+      item,
+      budget,
+      target,
+      sellerPrices: setupSellerPrices(sellerPrices),
+      policyId: activePolicyId,
+      replay,
+    });
+  }, [
+    persistSetup,
+    selectedProductId,
+    customMode,
+    customName,
+    item,
+    budget,
+    target,
+    sellerPrices,
+    activePolicyId,
+    replay,
+  ]);
 
   const parsedBudget = Number(budget);
   const parsedTarget = Number(target);
@@ -507,6 +646,7 @@ export default function TradingFloorPage() {
     product: Product,
     options?: { custom?: boolean; expandPrices?: boolean },
   ) {
+    setPersistSetup(true);
     setSelectedProductId(product.id);
     setItem(product.item);
     setBudget(String(product.budget));
@@ -530,6 +670,7 @@ export default function TradingFloorPage() {
   }
 
   function chooseProduct(value: string) {
+    setPersistSetup(true);
     if (value === CUSTOM_PRODUCT_ID) {
       setSelectedProductId(CUSTOM_PRODUCT_ID);
       setItem("");
@@ -562,6 +703,7 @@ export default function TradingFloorPage() {
   function saveCustomProduct() {
     if (!customMode || !isValid || !sellerPricesValid) return;
 
+    setPersistSetup(true);
     const name = customName.trim();
     const product: Product = {
       id: selectedSavedProduct?.id ?? newCustomProductId(),
@@ -599,6 +741,7 @@ export default function TradingFloorPage() {
 
   function resetToProductDefaults() {
     if (replay) return;
+    setPersistSetup(true);
 
     if (selectedSavedProduct) {
       applyProduct(selectedSavedProduct, { custom: true, expandPrices: true });
@@ -620,6 +763,30 @@ export default function TradingFloorPage() {
     }
   }
 
+  /** Clears the saved mandate and returns every control to the catalog default. */
+  function resetSetup() {
+    clearSetup();
+    setPersistSetup(false);
+
+    const monitor =
+      products.find((product) => product.id === FALLBACK_PRODUCT.id) ?? FALLBACK_PRODUCT;
+    setSelectedProductId(monitor.id);
+    setItem(monitor.item);
+    setBudget(String(monitor.budget));
+    setTarget(String(monitor.target));
+    setCustomName("");
+    setSellerPrices(sellerPriceInputsFor(monitor));
+    setSellerPricesOpen(false);
+    setCustomNotice(null);
+    setReplay(false);
+    setActivePolicyId("");
+    setSelectedPolicyId("");
+    setTouched({});
+    setSubmitAttempted(false);
+    setAttemptedPolicyId(null);
+    setPayError(null);
+  }
+
   function updateSellerPrice(
     name: string,
     field: "list" | "floor" | "delivery",
@@ -632,11 +799,13 @@ export default function TradingFloorPage() {
   }
 
   function clearSellerPrices() {
+    setPersistSetup(true);
     setSellerPrices(blankSellerPriceInputs());
   }
 
   function matchShopPrices() {
     if (!selectedPolicy) return;
+    setPersistSetup(true);
     setSellerPrices(
       Object.fromEntries(
         SELLER_NAMES.map((name) => [
@@ -722,7 +891,11 @@ export default function TradingFloorPage() {
         : "Using the three default sellers.";
 
   return (
-    <div className="xl:flex xl:min-h-[calc(100dvh-8.5rem)] xl:flex-col">
+    <div
+      className="xl:flex xl:min-h-[calc(100dvh-8.5rem)] xl:flex-col"
+      onChangeCapture={() => setPersistSetup(true)}
+      onInputCapture={() => setPersistSetup(true)}
+    >
       {/* Header -------------------------------------------------------- */}
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -920,7 +1093,12 @@ export default function TradingFloorPage() {
             <select
               id="policy"
               value={selectedPolicy?.policy_id ?? ""}
-              onChange={(event) => setSelectedPolicyId(event.target.value)}
+              onChange={(event) => {
+                const nextPolicyId = event.target.value;
+                setActivePolicyId(nextPolicyId);
+                setSelectedPolicyId(nextPolicyId);
+                setPersistSetup(true);
+              }}
               disabled={replay || savedPolicies.length === 0 || sessionActive}
               className="field truncate"
             >
@@ -1064,6 +1242,17 @@ export default function TradingFloorPage() {
             >
               <RotateCcw className="size-3.5" aria-hidden="true" />
               Reset to product defaults
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetSetup}
+              disabled={sessionActive}
+              className="h-7 px-2 text-[11px]"
+              title="Clear the stored setup and start from the default product."
+            >
+              <Trash2 className="size-3.5" aria-hidden="true" />
+              Reset setup
             </Button>
             {result && sessionActive ? <span>Stop listening to start again.</span> : null}
             {sessionActive ? (

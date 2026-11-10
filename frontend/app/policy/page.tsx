@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -28,9 +28,10 @@ import {
   ApiError,
   compilePolicy,
   createManualPolicy,
+  getProducts,
   NEGOTIATE_DEFAULTS,
 } from "@/lib/api";
-import type { CompiledPolicy } from "@/lib/types";
+import type { CompiledPolicy, Product } from "@/lib/types";
 import {
   forgetPolicy,
   rememberPolicy,
@@ -38,6 +39,12 @@ import {
   useSavedPolicies,
   useSelectedPolicyId,
 } from "@/lib/policyStore";
+import {
+  loadSetup,
+  saveSetup,
+  SETUP_SELLERS,
+  type TradingSetup,
+} from "@/lib/setupStore";
 import { cn } from "@/lib/cn";
 
 const MAX_RULES = 2000;
@@ -115,6 +122,72 @@ const EMPTY_QUICK_FORM: QuickForm = {
   personality: "friendly but firm",
 };
 
+/** Mirrors the catalog's default monitor when no tab setup exists. */
+const DEFAULT_SETUP: TradingSetup = {
+  productId: "monitor",
+  customProduct: null,
+  item: "a 27-inch monitor",
+  budget: "90",
+  target: "85",
+  sellerPrices: {
+    "Firm Co": { list: "105", floor: "85" },
+    "Flex Ltd": { list: "98", floor: "76" },
+    "Premium Hub": { list: "118", floor: "88" },
+  },
+  policyId: "",
+  replay: false,
+};
+
+type MarketSnapshot = {
+  name: string;
+  budget: string;
+  target: string;
+  sellerPrices: TradingSetup["sellerPrices"];
+};
+
+const DEFAULT_MARKET: MarketSnapshot = {
+  name: "27-inch monitor",
+  budget: DEFAULT_SETUP.budget,
+  target: DEFAULT_SETUP.target,
+  sellerPrices: DEFAULT_SETUP.sellerPrices,
+};
+
+function productNameFromItem(item: string): string {
+  const trimmed = item.trim().replace(/^(?:a|an)\s+/i, "");
+  if (!trimmed) return DEFAULT_MARKET.name;
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function marketFromSetup(
+  setup: TradingSetup,
+  catalog: Product[] = [],
+): MarketSnapshot {
+  const catalogProduct = catalog.find((product) => product.id === setup.productId);
+  return {
+    name:
+      setup.customProduct?.name.trim() ||
+      catalogProduct?.name ||
+      productNameFromItem(setup.item),
+    budget: setup.budget,
+    target: setup.target,
+    sellerPrices: setup.sellerPrices,
+  };
+}
+
+function marketFromProduct(product: Product): MarketSnapshot {
+  return {
+    name: product.name,
+    budget: String(product.budget),
+    target: String(product.target),
+    sellerPrices: Object.fromEntries(
+      Object.entries(product.prices).map(([seller, price]) => [
+        seller,
+        { list: String(price.list), floor: String(price.floor) },
+      ]),
+    ),
+  };
+}
+
 export default function PolicyPage() {
   const [mode, setMode] = useState<PolicyMode>("rules");
   const [rules, setRules] = useState("");
@@ -126,6 +199,47 @@ export default function PolicyPage() {
   const [touched, setTouched] = useState(false);
   const savedPolicies = useSavedPolicies();
   const selectedPolicyId = useSelectedPolicyId();
+  const [market, setMarket] = useState<MarketSnapshot>(DEFAULT_MARKET);
+
+  // Session storage is only available after mount, so the static HTML keeps
+  // the default market until this effect can read the tab's saved setup.
+  useEffect(() => {
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+
+      const setup = loadSetup();
+      if (setup) setMarket(marketFromSetup(setup));
+
+      getProducts()
+        .then((catalog) => {
+          if (cancelled || !Array.isArray(catalog) || catalog.length === 0) return;
+          if (setup) {
+            setMarket(marketFromSetup(setup, catalog));
+            return;
+          }
+          const monitor =
+            catalog.find((product) => product.id === DEFAULT_SETUP.productId) ??
+            catalog[0];
+          setMarket(marketFromProduct(monitor));
+        })
+        .catch(() => {
+          // The default monitor card is already the correct fallback.
+        });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Persist the chosen shop into this tab's setup, then let the link navigate. */
+  function selectPolicyForFloor(policyId: string) {
+    const setup = loadSetup() ?? DEFAULT_SETUP;
+    saveSetup({ ...setup, policyId, replay: false });
+    setSelectedPolicyId(policyId);
+  }
 
   const trimmed = rules.trim();
   const rulesError =
@@ -272,6 +386,8 @@ export default function PolicyPage() {
           </>
         }
       />
+
+      <MarketReference market={market} />
 
       <div className="grid items-start gap-4 xl:grid-cols-[1.02fr_0.98fr]">
         {/* Composer --------------------------------------------------- */}
@@ -713,7 +829,7 @@ export default function PolicyPage() {
             ) : status === "success" && policy ? (
               <PolicyPreview
                 policy={policy}
-                onUse={() => setSelectedPolicyId(policy.policy_id)}
+                onUse={() => selectPolicyForFloor(policy.policy_id)}
               />
             ) : (
               <PreviewPlaceholder />
@@ -826,7 +942,7 @@ export default function PolicyPage() {
                     <div className="mt-auto flex items-center gap-2 pt-4">
                       <Link
                         href="/trading-floor"
-                        onClick={() => setSelectedPolicyId(saved.policy_id)}
+                        onClick={() => selectPolicyForFloor(saved.policy_id)}
                         className={buttonClasses(
                           selected ? "secondary" : "primary",
                           "sm",
@@ -894,6 +1010,75 @@ export default function PolicyPage() {
         </p>
       </section>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Market reference                                                   */
+/* ------------------------------------------------------------------ */
+
+function marketMoney(value: string): string {
+  const number = Number(value);
+  return value.trim() !== "" && Number.isFinite(number) ? usd.format(number) : "$—";
+}
+
+function MarketReference({ market }: { market: MarketSnapshot }) {
+  return (
+    <section aria-labelledby="market-heading" className="card p-4 sm:p-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] xl:items-center">
+        <div>
+          <p className="label mb-1.5 text-accent">Market reference</p>
+          <h2 id="market-heading" className="text-h3 font-semibold text-ink">
+            Market for: {market.name}
+          </h2>
+          <p className="mt-1 text-small leading-relaxed text-muted">
+            Your shop competes against these prices.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-2 px-2.5 py-1 text-[11px] text-muted">
+              <span className="text-faint">Buyer budget</span>
+              <span className="num font-medium text-ink">{marketMoney(market.budget)}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-2 px-2.5 py-1 text-[11px] text-muted">
+              <span className="text-faint">Target</span>
+              <span className="num font-medium text-ink">{marketMoney(market.target)}</span>
+            </span>
+          </div>
+        </div>
+
+        <dl className="grid gap-2 sm:grid-cols-3">
+          {SETUP_SELLERS.map((seller) => {
+            const prices = market.sellerPrices[seller];
+            return (
+              <div
+                key={seller}
+                className="rounded-control border border-line bg-surface-2/60 px-3 py-2.5"
+              >
+                <dt className="truncate text-[11px] font-medium text-ink">{seller}</dt>
+                <dd className="mt-2 grid grid-cols-2 gap-2">
+                  <span>
+                    <span className="block text-[9px] uppercase tracking-[0.08em] text-faint">
+                      List price
+                    </span>
+                    <span className="num mt-0.5 block text-[12px] font-medium text-ink">
+                      {marketMoney(prices?.list ?? "")}
+                    </span>
+                  </span>
+                  <span>
+                    <span className="block text-[9px] uppercase tracking-[0.08em] text-faint">
+                      Lowest price
+                    </span>
+                    <span className="num mt-0.5 block text-[12px] font-medium text-ink">
+                      {marketMoney(prices?.floor ?? "")}
+                    </span>
+                  </span>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </div>
+    </section>
   );
 }
 
@@ -1057,7 +1242,7 @@ function PolicyPreview({
           onClick={onUse}
           className={buttonClasses("primary", "md", "shrink-0")}
         >
-          Use in a negotiation
+          Use this shop on the Trading Floor
           <ArrowRight className="size-4" aria-hidden="true" />
         </Link>
       </div>
