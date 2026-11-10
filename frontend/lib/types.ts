@@ -43,6 +43,16 @@ export interface CompiledPolicy {
   notes: string;
 }
 
+/** Response entry of `GET /api/products`. Seller keys match `backend/market.py`. */
+export interface Product {
+  id: string;
+  name: string;
+  item: string;
+  budget: number;
+  target: number;
+  prices: Record<string, { list: number; floor: number }>;
+}
+
 export interface RankingEntry {
   seller: string;
   price: number;

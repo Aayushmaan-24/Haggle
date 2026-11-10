@@ -25,8 +25,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { LoadingState, Skeleton } from "@/components/ui/LoadingState";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { ApiError, deliverDeal, getDeal, payDeal } from "@/lib/api";
-import type { Deal, DealStatus } from "@/lib/types";
+import { ApiError, deliverDeal, getDeal, getProducts, payDeal } from "@/lib/api";
+import type { Deal, DealStatus, Product } from "@/lib/types";
+import { useSavedProducts } from "@/lib/productStore";
 import { cn } from "@/lib/cn";
 
 const usd = new Intl.NumberFormat("en-US", {
@@ -114,6 +115,24 @@ function capitalize(value: string): string {
   return value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+/** The catalog name when the item matches, otherwise the item phrase without its article. */
+function productNameForItem(
+  item: string | null,
+  catalog: Product[],
+  saved: Product[],
+): string | null {
+  if (!item) return null;
+
+  const needle = item.trim().toLowerCase();
+  const match = [...catalog, ...saved].find(
+    (product) => product.item.trim().toLowerCase() === needle,
+  );
+  if (match) return match.name;
+
+  const withoutArticle = item.trim().replace(/^an?\s+/i, "");
+  return withoutArticle ? capitalize(withoutArticle) : null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Page                                                               */
 /* ------------------------------------------------------------------ */
@@ -144,12 +163,29 @@ export default function ReceiptPage() {
 function ReceiptBody() {
   const searchParams = useSearchParams();
   const requestedId = (searchParams.get("deal") ?? "").trim();
+  const savedProducts = useSavedProducts();
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<ReceiptState>(
     requestedId
       ? { kind: "loading", dealId: requestedId }
       : { kind: "missing" },
   );
+
+  // Product names are a presentation detail; a catalog failure never blocks the receipt.
+  useEffect(() => {
+    let cancelled = false;
+
+    getProducts()
+      .then((products) => {
+        if (!cancelled && Array.isArray(products)) setCatalogProducts(products);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!requestedId) return;
@@ -209,6 +245,11 @@ function ReceiptBody() {
       return (
         <DealReceipt
           deal={state.deal}
+          productName={productNameForItem(
+            formatText(state.deal.item),
+            catalogProducts,
+            savedProducts,
+          )}
           fallbackId={state.dealId}
           onDealUpdated={(deal) => setState({ kind: "ready", dealId: state.dealId, deal })}
         />
@@ -361,10 +402,12 @@ function LoadErrorState({
 
 function DealReceipt({
   deal,
+  productName,
   fallbackId,
   onDealUpdated,
 }: {
   deal: Deal;
+  productName: string | null;
   fallbackId: string;
   onDealUpdated: (deal: Deal) => void;
 }) {
@@ -476,7 +519,7 @@ function DealReceipt({
               )}
             </div>
             <h2 className="mt-3 break-words text-[26px] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[30px]">
-              {item ? capitalize(item) : "Your purchase"}
+              {productName ?? (item ? capitalize(item) : "Your purchase")}
             </h2>
             <p className="mt-1.5 text-body text-muted">
               {seller ? (
@@ -676,6 +719,10 @@ function DealReceipt({
               Deal details
             </h2>
             <dl className="mt-4 divide-y divide-line/70">
+              <DetailRow
+                label="Product"
+                value={productName ?? item ?? "Not recorded"}
+              />
               <DetailRow label="Seller" value={seller ?? "Not recorded"} />
               <DetailRow label="Delivery" value={delivery ?? "Not recorded"} />
               <DetailRow

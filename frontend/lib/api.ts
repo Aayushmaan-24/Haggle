@@ -1,4 +1,10 @@
-import type { CompiledPolicy, Deal, NegotiateParams, PayResponse } from "./types";
+import type {
+  CompiledPolicy,
+  Deal,
+  NegotiateParams,
+  PayResponse,
+  Product,
+} from "./types";
 
 const DEV_API_BASE = "http://localhost:8000";
 
@@ -111,6 +117,26 @@ export function compilePolicy(rules: string): Promise<CompiledPolicy> {
   return request<CompiledPolicy>("/api/policy/compile", {
     method: "POST",
     body: JSON.stringify({ rules }),
+  });
+}
+
+/** Catalog defaults for the Trading Floor's product picker. */
+export function getProducts(): Promise<Product[]> {
+  return request<Product[]>("/api/products");
+}
+
+/** Creates a seller policy from explicit terms, without the model compiler. */
+export function createManualPolicy(input: {
+  name: string;
+  list_price: number;
+  floor: number;
+  deposit_percent: number;
+  delivery_days: number;
+  personality: string;
+}): Promise<CompiledPolicy> {
+  return request<CompiledPolicy>("/api/policy/manual", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 

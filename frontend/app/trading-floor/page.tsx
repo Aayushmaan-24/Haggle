@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { ColDef, GridApi } from "ag-grid-community";
 import {
   Activity,
+  AlertTriangle,
   ArrowRight,
   ChartSpline,
   ChevronDown,
@@ -14,22 +15,31 @@ import {
   Loader2,
   Play,
   Radio,
+  RefreshCw,
   RotateCcw,
+  Save,
   ServerCrash,
+  ShoppingBag,
   SlidersHorizontal,
+  Trash2,
   Trophy,
   Wallet,
 } from "lucide-react";
 import type { SseEvent } from "@/lib/sse";
 import { useNegotiation } from "@/lib/useNegotiation";
-import { payDeal } from "@/lib/api";
-import type { Deal } from "@/lib/types";
+import { getProducts, payDeal } from "@/lib/api";
+import type { Deal, Product } from "@/lib/types";
 import {
   forgetPolicy,
   setSelectedPolicyId,
   useSavedPolicies,
   useSelectedPolicyId,
 } from "@/lib/policyStore";
+import {
+  forgetProduct,
+  rememberProduct,
+  useSavedProducts,
+} from "@/lib/productStore";
 import { cn } from "@/lib/cn";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -57,12 +67,75 @@ const MAX_ROUNDS = 5;
 /** Names must match `backend/market.py` exactly. Prices are entered per run. */
 const SELLER_NAMES = ["Firm Co", "Flex Ltd", "Premium Hub"] as const;
 
+/** `/api/products` only carries list/floor, so delivery keeps the market defaults. */
+const SELLER_DELIVERY: Record<string, string> = {
+  "Firm Co": "4",
+  "Flex Ltd": "6",
+  "Premium Hub": "2",
+};
+
+const CUSTOM_PRODUCT_ID = "__custom__";
+const CUSTOM_PRODUCT_LABEL = "Custom product…";
+const EMPTY_EVENTS: SseEvent[] = [];
+
+/** Used only when `/api/products` fails; the API returns this same product. */
+const FALLBACK_PRODUCT: Product = {
+  id: "monitor",
+  name: "27-inch monitor",
+  item: "a 27-inch monitor",
+  budget: 90,
+  target: 85,
+  prices: {
+    "Firm Co": { list: 105, floor: 85 },
+    "Flex Ltd": { list: 98, floor: 76 },
+    "Premium Hub": { list: 118, floor: 88 },
+  },
+};
+
 type SellerPriceInput = { list: string; floor: string; delivery: string };
+type ProductsStatus = "loading" | "ready" | "error";
 
 function blankSellerPriceInputs(): Record<string, SellerPriceInput> {
   return Object.fromEntries(
     SELLER_NAMES.map((name) => [name, { list: "", floor: "", delivery: "" }]),
   );
+}
+
+/** A new custom product starts with only prices empty; delivery keeps market defaults. */
+function customSellerPriceInputs(): Record<string, SellerPriceInput> {
+  return Object.fromEntries(
+    SELLER_NAMES.map((name) => [
+      name,
+      { list: "", floor: "", delivery: SELLER_DELIVERY[name] ?? "4" },
+    ]),
+  );
+}
+
+function sellerPriceInputsFor(product: Product): Record<string, SellerPriceInput> {
+  return Object.fromEntries(
+    SELLER_NAMES.map((name) => {
+      const price = product.prices[name];
+      return [
+        name,
+        {
+          list: price ? String(price.list) : "",
+          floor: price ? String(price.floor) : "",
+          delivery: SELLER_DELIVERY[name] ?? "4",
+        },
+      ];
+    }),
+  );
+}
+
+/** The backend wants an item phrase; custom names only get the article prefix. */
+function itemPhraseFor(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  return /^an?\s+/i.test(trimmed) ? trimmed : `a ${trimmed}`;
+}
+
+function newCustomProductId(): string {
+  return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /**
@@ -174,10 +247,11 @@ export default function TradingFloorPage() {
   const savedPolicies = useSavedPolicies();
   const selectedPolicyId = useSelectedPolicyId();
   const selectedPolicy = savedPolicies.find((item) => item.policy_id === selectedPolicyId) ?? null;
+  const savedProducts = useSavedProducts();
 
-  const [item, setItem] = useState("a 27-inch monitor");
-  const [budget, setBudget] = useState("90");
-  const [target, setTarget] = useState("85");
+  const [item, setItem] = useState(FALLBACK_PRODUCT.item);
+  const [budget, setBudget] = useState(String(FALLBACK_PRODUCT.budget));
+  const [target, setTarget] = useState(String(FALLBACK_PRODUCT.target));
   const [replay, setReplay] = useState(false);
   const [runTarget, setRunTarget] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -188,14 +262,79 @@ export default function TradingFloorPage() {
   const [payError, setPayError] = useState<string | null>(null);
   const [sellerPricesOpen, setSellerPricesOpen] = useState(false);
   const [sellerPrices, setSellerPrices] = useState<Record<string, SellerPriceInput>>(
-    blankSellerPriceInputs,
+    () => sellerPriceInputsFor(FALLBACK_PRODUCT),
   );
-  const itemRef = useRef<HTMLInputElement>(null);
+  const [products, setProducts] = useState<Product[]>([FALLBACK_PRODUCT]);
+  const [productsStatus, setProductsStatus] = useState<ProductsStatus>("loading");
+  const [productsAttempt, setProductsAttempt] = useState(0);
+  const [selectedProductId, setSelectedProductId] = useState(FALLBACK_PRODUCT.id);
+  const [customName, setCustomName] = useState("");
+  const [customNotice, setCustomNotice] = useState<string | null>(null);
+  const [runSignature, setRunSignature] = useState<string | null>(null);
+  const [runProductName, setRunProductName] = useState("");
+  const productSelectRef = useRef<HTMLSelectElement>(null);
+  const customNameRef = useRef<HTMLInputElement>(null);
+
+  const selectedCatalogProduct =
+    products.find((product) => product.id === selectedProductId) ?? null;
+  const selectedSavedProduct =
+    savedProducts.find((product) => product.id === selectedProductId) ?? null;
+  const selectedProduct = selectedCatalogProduct ?? selectedSavedProduct;
+  const customMode =
+    selectedProductId === CUSTOM_PRODUCT_ID || Boolean(selectedSavedProduct);
+  const selectedProductLabel = customMode
+    ? customName.trim() || "Custom product"
+    : (selectedProduct?.name ?? FALLBACK_PRODUCT.name);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getProducts()
+      .then((list) => {
+        if (cancelled) return;
+        const next = Array.isArray(list)
+          ? list.filter(
+              (product): product is Product =>
+                typeof product === "object" &&
+                product !== null &&
+                typeof product.id === "string" &&
+                typeof product.name === "string" &&
+                typeof product.item === "string" &&
+                typeof product.prices === "object" &&
+                product.prices !== null,
+            )
+          : [];
+
+        if (next.length === 0) {
+          setProducts([FALLBACK_PRODUCT]);
+          setProductsStatus("error");
+          return;
+        }
+
+        setProducts(next);
+        setProductsStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProducts([FALLBACK_PRODUCT]);
+        setProductsStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [productsAttempt]);
 
   const parsedBudget = Number(budget);
   const parsedTarget = Number(target);
 
-  const itemError = item.trim().length === 0 ? "Describe what you want to buy." : null;
+  const customNameError =
+    customMode && customName.trim().length === 0 ? "Enter a product name." : null;
+  const itemError = customMode
+    ? customNameError
+    : item.trim().length === 0
+      ? "Choose a product."
+      : null;
   const budgetError =
     budget.trim() === ""
       ? "Enter a budget."
@@ -258,13 +397,62 @@ export default function TradingFloorPage() {
   const sellerPricesBlocking = !replay && !sellerPricesValid;
   const showCustomPolicy = Boolean(selectedPolicy);
 
+  const marketAverageList = (() => {
+    const source = selectedSavedProduct ?? selectedCatalogProduct;
+    const values = source
+      ? SELLER_NAMES.map((name) => source.prices[name]?.list)
+      : SELLER_NAMES.map((name) => Number(sellerPrices[name]?.list ?? ""));
+    const valid = values.filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
+    if (valid.length === 0) return null;
+    return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+  })();
+
+  const priceSanityWarning =
+    !replay &&
+    selectedPolicy !== null &&
+    marketAverageList !== null &&
+    (selectedPolicy.list_price < marketAverageList * 0.5 ||
+      selectedPolicy.list_price > marketAverageList * 1.6);
+
   const sessionActive =
     state.connectionStatus === "open" || state.connectionStatus === "connecting";
-  const running = sessionActive && !state.result;
-  const canStart = !submitting && !sessionActive && !sellerPricesBlocking;
 
   // A policy is only attached to live runs; the recorded replay has its own cast.
   const policyId = replay ? undefined : selectedPolicy?.policy_id;
+
+  const currentSignature = JSON.stringify({
+    productId: selectedProductId,
+    item: item.trim(),
+    budget: budget.trim(),
+    target: target.trim(),
+    replay,
+    policyId: policyId ?? "",
+    prices: replay
+      ? null
+      : SELLER_NAMES.map((name) => [
+          name,
+          sellerPrices[name]?.list.trim() ?? "",
+          sellerPrices[name]?.floor.trim() ?? "",
+          sellerPrices[name]?.delivery.trim() ?? "",
+        ]),
+  });
+
+  // Editing any mandate setting after a finished run hides that run's result.
+  const staleResult =
+    runSignature !== null && state.result !== null && runSignature !== currentSignature;
+  const visibleEvents = staleResult ? EMPTY_EVENTS : state.events;
+
+  const running = sessionActive && !state.result;
+  const canStart =
+    !submitting &&
+    !sessionActive &&
+    !sellerPricesBlocking &&
+    isValid &&
+    productsStatus !== "loading";
+
   const failedPolicy = attemptedPolicyId
     ? (savedPolicies.find((policy) => policy.policy_id === attemptedPolicyId) ?? null)
     : null;
@@ -273,31 +461,36 @@ export default function TradingFloorPage() {
     state.connectionStatus === "error" &&
     state.error?.trim().toLowerCase() === "unknown policy";
 
-  const { lanes, offers, maxRound } = useMemo(() => derive(state.events), [state.events]);
+  const { lanes, offers, maxRound } = useMemo(
+    () => derive(visibleEvents),
+    [visibleEvents],
+  );
 
   const notice = useMemo(() => {
-    for (let index = state.events.length - 1; index >= 0; index -= 1) {
-      const event = state.events[index];
+    for (let index = visibleEvents.length - 1; index >= 0; index -= 1) {
+      const event = visibleEvents[index];
       if (event.type === "notice") return event.message;
     }
     return null;
-  }, [state.events]);
+  }, [visibleEvents]);
 
   const serverError = useMemo(() => {
-    for (let index = state.events.length - 1; index >= 0; index -= 1) {
-      const event = state.events[index];
+    for (let index = visibleEvents.length - 1; index >= 0; index -= 1) {
+      const event = visibleEvents[index];
       if (event.type === "error") return event.message;
     }
     return null;
-  }, [state.events]);
+  }, [visibleEvents]);
 
-  const result = state.result;
+  const result = staleResult ? null : state.result;
   const winner = result?.winner ?? null;
-  const dealId = state.deal?.deal_id ?? result?.deal_id ?? null;
-  const alreadyPaid = state.deal !== null && state.deal.status !== "negotiated";
-  const fatalError = state.error ?? serverError;
-  const connecting = state.connectionStatus === "connecting" && state.events.length === 0;
-  const currentRound = state.currentRound;
+  const dealId = staleResult ? null : (state.deal?.deal_id ?? result?.deal_id ?? null);
+  const alreadyPaid =
+    !staleResult && state.deal !== null && state.deal.status !== "negotiated";
+  const fatalError = staleResult ? null : (state.error ?? serverError);
+  const connecting =
+    state.connectionStatus === "connecting" && visibleEvents.length === 0;
+  const currentRound = staleResult ? 0 : state.currentRound;
 
   const depositAmount = winner
     ? (state.deal?.deposit ?? (winner.price * winner.deposit_percent) / 100)
@@ -309,6 +502,123 @@ export default function TradingFloorPage() {
     winner && result?.list_price && result.list_price > 0
       ? (savedAmount / result.list_price) * 100
       : 0;
+
+  function applyProduct(
+    product: Product,
+    options?: { custom?: boolean; expandPrices?: boolean },
+  ) {
+    setSelectedProductId(product.id);
+    setItem(product.item);
+    setBudget(String(product.budget));
+    setTarget(String(product.target));
+    setCustomName(options?.custom ? product.name : "");
+    setSellerPrices(sellerPriceInputsFor(product));
+    if (options?.expandPrices) setSellerPricesOpen(true);
+    setCustomNotice(null);
+    setTouched({});
+  }
+
+  function handleReplayChange(enabled: boolean) {
+    setReplay(enabled);
+    if (!enabled) return;
+
+    // Replay is a fixed recording. Lock the floor to the monitor it was recorded with.
+    const monitor =
+      products.find((product) => product.id === FALLBACK_PRODUCT.id) ?? FALLBACK_PRODUCT;
+    applyProduct(monitor);
+    setSellerPricesOpen(false);
+  }
+
+  function chooseProduct(value: string) {
+    if (value === CUSTOM_PRODUCT_ID) {
+      setSelectedProductId(CUSTOM_PRODUCT_ID);
+      setItem("");
+      setBudget("");
+      setTarget("");
+      setCustomName("");
+      setSellerPrices(customSellerPriceInputs());
+      setSellerPricesOpen(true);
+      setCustomNotice(null);
+      setTouched({});
+      return;
+    }
+
+    const saved = savedProducts.find((product) => product.id === value);
+    if (saved) {
+      applyProduct(saved, { custom: true, expandPrices: true });
+      return;
+    }
+
+    const product = products.find((entry) => entry.id === value);
+    if (product) applyProduct(product);
+  }
+
+  function updateCustomName(value: string) {
+    setCustomName(value);
+    setItem(itemPhraseFor(value));
+    setCustomNotice(null);
+  }
+
+  function saveCustomProduct() {
+    if (!customMode || !isValid || !sellerPricesValid) return;
+
+    const name = customName.trim();
+    const product: Product = {
+      id: selectedSavedProduct?.id ?? newCustomProductId(),
+      name,
+      item: itemPhraseFor(name),
+      budget: parsedBudget,
+      target: parsedTarget,
+      prices: Object.fromEntries(
+        SELLER_NAMES.map((seller) => [
+          seller,
+          {
+            list: Number(sellerPrices[seller].list),
+            floor: Number(sellerPrices[seller].floor),
+          },
+        ]),
+      ),
+    };
+
+    rememberProduct(product);
+    setSelectedProductId(product.id);
+    setItem(product.item);
+    setCustomName(product.name);
+    setCustomNotice("Saved to this browser.");
+  }
+
+  function deleteSelectedCustomProduct() {
+    if (!selectedSavedProduct) return;
+    forgetProduct(selectedSavedProduct.id);
+    const monitor =
+      products.find((product) => product.id === FALLBACK_PRODUCT.id) ?? FALLBACK_PRODUCT;
+    applyProduct(monitor);
+    setSellerPricesOpen(false);
+    setCustomNotice(null);
+  }
+
+  function resetToProductDefaults() {
+    if (replay) return;
+
+    if (selectedSavedProduct) {
+      applyProduct(selectedSavedProduct, { custom: true, expandPrices: true });
+      return;
+    }
+    if (selectedCatalogProduct) {
+      applyProduct(selectedCatalogProduct);
+      return;
+    }
+    if (selectedProductId === CUSTOM_PRODUCT_ID) {
+      setItem("");
+      setBudget("");
+      setTarget("");
+      setCustomName("");
+      setSellerPrices(customSellerPriceInputs());
+      setSellerPricesOpen(true);
+      setCustomNotice(null);
+      setTouched({});
+    }
+  }
 
   function updateSellerPrice(
     name: string,
@@ -364,6 +674,8 @@ export default function TradingFloorPage() {
     if (!isValid || sellerPricesBlocking || submitting || sessionActive) return;
 
     setSubmitting(true);
+    setRunSignature(currentSignature);
+    setRunProductName(selectedProductLabel);
     setAttemptedPolicyId(policyId ?? null);
     setRunTarget(parsedTarget);
     setPayError(null);
@@ -404,7 +716,7 @@ export default function TradingFloorPage() {
   const policyHelp = replay
     ? "Recorded playback follows a saved run, so seller policies are skipped."
     : selectedPolicy
-      ? `${selectedPolicy.name} · list ${money(selectedPolicy.list_price)} · floor ${money(selectedPolicy.floor)} · ${selectedPolicy.deposit_percent}% deposit · ${selectedPolicy.delivery_days}-day delivery`
+      ? `${selectedPolicy.name} is attached to your next live negotiation.`
       : savedPolicies.length === 0
         ? "No saved policies yet — the three default sellers will negotiate."
         : "Using the three default sellers.";
@@ -438,24 +750,94 @@ export default function TradingFloorPage() {
       <div className="card shrink-0 p-3">
         <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.62fr)_minmax(0,0.62fr)_minmax(0,1.15fr)_auto_auto] xl:items-end">
           <div className="space-y-1.5">
-            <label htmlFor="item" className="label block">
-              What do you want to buy?
+            <label htmlFor="product" className="label block">
+              Product
             </label>
-            <input
-              ref={itemRef}
-              id="item"
-              value={item}
-              onChange={(event) => setItem(event.target.value)}
-              onBlur={() => setTouched((current) => ({ ...current, item: true }))}
-              placeholder="e.g. a 27-inch monitor"
-              aria-invalid={showItemError || undefined}
-              aria-describedby={showItemError ? "item-error" : undefined}
-              className={cn("field", showItemError && INPUT_ERROR)}
-            />
-            {showItemError ? (
-              <p id="item-error" className="text-[11px] text-danger">
-                {itemError}
+            <select
+              ref={productSelectRef}
+              id="product"
+              value={selectedProductId}
+              onChange={(event) => chooseProduct(event.target.value)}
+              disabled={replay || sessionActive || productsStatus === "loading"}
+              className="field truncate"
+            >
+              {productsStatus === "loading" ? (
+                <option value={FALLBACK_PRODUCT.id}>Loading products…</option>
+              ) : (
+                products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))
+              )}
+              {savedProducts.length > 0 ? (
+                <optgroup label="Saved in this browser">
+                  {savedProducts.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              <option value={CUSTOM_PRODUCT_ID}>{CUSTOM_PRODUCT_LABEL}</option>
+            </select>
+
+            {productsStatus === "loading" ? (
+              <p className="flex items-center gap-1.5 text-[10px] text-faint">
+                <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                Loading product catalog…
               </p>
+            ) : null}
+
+            {customMode ? (
+              <div className="space-y-1.5 pt-1">
+                <label htmlFor="custom-name" className="label block">
+                  Product name
+                </label>
+                <input
+                  ref={customNameRef}
+                  id="custom-name"
+                  value={customName}
+                  onChange={(event) => updateCustomName(event.target.value)}
+                  onBlur={() =>
+                    setTouched((current) => ({ ...current, item: true }))
+                  }
+                  placeholder="e.g. Vintage desk lamp"
+                  aria-invalid={showItemError || undefined}
+                  aria-describedby={showItemError ? "custom-name-error" : undefined}
+                  className={cn("field", showItemError && INPUT_ERROR)}
+                />
+                {showItemError ? (
+                  <p id="custom-name-error" className="text-[11px] text-danger">
+                    {itemError}
+                  </p>
+                ) : null}
+                {selectedSavedProduct ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-line bg-surface-2/50 px-2.5 py-1.5">
+                    <span className="inline-flex items-center gap-1.5 text-[10px] text-faint">
+                      <ShoppingBag className="size-3" aria-hidden="true" />
+                      Saved in this browser
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {customNotice ? (
+                        <span className="text-[10px] text-success">{customNotice}</span>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={deleteSelectedCustomProduct}
+                        className="h-6 px-1.5 text-danger hover:bg-danger-soft"
+                        aria-label={`Delete ${selectedSavedProduct.name}`}
+                      >
+                        <Trash2 className="size-3" aria-hidden="true" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ) : customNotice ? (
+                  <p className="text-[10px] text-success">{customNotice}</p>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
@@ -549,6 +931,46 @@ export default function TradingFloorPage() {
                 </option>
               ))}
             </select>
+
+            {selectedPolicy ? (
+              <dl
+                aria-label="Selected seller policy"
+                className="grid grid-cols-4 gap-1.5 rounded-control border border-line bg-surface-2/60 px-2.5 py-1.5"
+              >
+                <div className="min-w-0">
+                  <dt className="text-[8px] uppercase tracking-[0.08em] text-faint">List</dt>
+                  <dd className="num truncate text-[10px] font-medium text-ink">
+                    {money(selectedPolicy.list_price)}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[8px] uppercase tracking-[0.08em] text-faint">Floor</dt>
+                  <dd className="num truncate text-[10px] font-medium text-ink">
+                    {money(selectedPolicy.floor)}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[8px] uppercase tracking-[0.08em] text-faint">Deposit</dt>
+                  <dd className="num truncate text-[10px] font-medium text-ink">
+                    {Math.round(selectedPolicy.deposit_percent)}%
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[8px] uppercase tracking-[0.08em] text-faint">Delivery</dt>
+                  <dd className="num truncate text-[10px] font-medium text-ink">
+                    {selectedPolicy.delivery_days}d
+                  </dd>
+                </div>
+              </dl>
+            ) : null}
+
+            {priceSanityWarning ? (
+              <p className="flex items-start gap-1.5 rounded-control border border-warning-line bg-warning-soft px-2.5 py-1.5 text-[10px] leading-relaxed text-warning">
+                <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                This shop&apos;s prices look far from this product&apos;s market, so it
+                may win or lose by default.
+              </p>
+            ) : null}
           </div>
 
           <div className="flex items-end">
@@ -561,7 +983,7 @@ export default function TradingFloorPage() {
                 id="replay"
                 type="checkbox"
                 checked={replay}
-                onChange={(event) => setReplay(event.target.checked)}
+                onChange={(event) => handleReplayChange(event.target.checked)}
                 disabled={sessionActive}
                 className="size-4 rounded border-line bg-surface-3 accent-[var(--color-accent)]"
               />
@@ -594,6 +1016,32 @@ export default function TradingFloorPage() {
           </Button>
         </div>
 
+        {productsStatus === "error" ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-control border border-warning-line bg-warning-soft px-3 py-2">
+            <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-warning">
+              Could not load the product catalog. Using the 27-inch monitor default.
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setProductsStatus("loading");
+                setProductsAttempt((value) => value + 1);
+              }}
+            >
+              <RefreshCw className="size-3.5" aria-hidden="true" />
+              Retry
+            </Button>
+          </div>
+        ) : null}
+
+        {replay ? (
+          <p className="mt-2 flex items-center gap-2 rounded-control border border-info-line bg-info-soft px-3 py-2 text-[11px] text-info">
+            <Info className="size-3.5 shrink-0" aria-hidden="true" />
+            Recorded negotiations always use the 27-inch monitor.
+          </p>
+        ) : null}
+
         <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <p className="min-w-0 flex-1 truncate text-[11px] text-faint">
             {policyHelp}
@@ -606,7 +1054,17 @@ export default function TradingFloorPage() {
               </>
             ) : null}
           </p>
-          <div className="flex items-center gap-3 text-[11px] text-faint">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetToProductDefaults}
+              disabled={replay}
+              className="h-7 px-2 text-[11px]"
+            >
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              Reset to product defaults
+            </Button>
             {result && sessionActive ? <span>Stop listening to start again.</span> : null}
             {sessionActive ? (
               <span className="hidden sm:inline">
@@ -796,15 +1254,28 @@ export default function TradingFloorPage() {
                   Lowest price must be above $0 and not above list. Sellers above 7
                   delivery days are marked out.
                 </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearSellerPrices}
-                  disabled={replay}
-                >
-                  <RotateCcw className="size-3.5" aria-hidden="true" />
-                  Clear values
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {customMode ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={saveCustomProduct}
+                      disabled={replay || !isValid || !sellerPricesValid}
+                    >
+                      <Save className="size-3.5" aria-hidden="true" />
+                      Save to this browser
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearSellerPrices}
+                    disabled={replay}
+                  >
+                    <RotateCcw className="size-3.5" aria-hidden="true" />
+                    Clear values
+                  </Button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -862,7 +1333,13 @@ export default function TradingFloorPage() {
             <p className="text-[12px] font-semibold text-danger">The floor went quiet</p>
             <p className="text-[11px] leading-relaxed text-danger/85">{fatalError}</p>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => itemRef.current?.focus()}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              (customMode ? customNameRef : productSelectRef).current?.focus()
+            }
+          >
             Edit mandate
           </Button>
         </div>
@@ -872,6 +1349,7 @@ export default function TradingFloorPage() {
       {result && winner ? (
         <WinnerBanner
           winner={winner}
+          productName={runProductName}
           deal={state.deal}
           dealId={dealId}
           depositAmount={depositAmount}
@@ -900,7 +1378,7 @@ export default function TradingFloorPage() {
 
       {/* Arena --------------------------------------------------------- */}
       <div className="mt-2.5 xl:flex-1">
-        {state.events.length === 0 && !connecting ? (
+        {visibleEvents.length === 0 && !connecting ? (
           <div className="card flex h-full min-h-[420px] flex-col items-center justify-center p-8 text-center xl:min-h-0">
             <div className="relative">
               <span
@@ -964,7 +1442,7 @@ export default function TradingFloorPage() {
                   responding={
                     running &&
                     lane.lastWho !== null &&
-                    lane.seller === lastRespondingSeller(state.events)
+                    lane.seller === lastRespondingSeller(visibleEvents)
                   }
                 />
               ))}
@@ -1490,6 +1968,7 @@ type Winner = NonNullable<NonNullable<ReturnType<typeof useNegotiation>[0]["resu
 
 function WinnerBanner({
   winner,
+  productName,
   deal,
   dealId,
   depositAmount,
@@ -1502,6 +1981,7 @@ function WinnerBanner({
   onPay,
 }: {
   winner: Winner;
+  productName: string;
   deal: Deal | null;
   dealId: string | null;
   depositAmount: number;
@@ -1528,6 +2008,10 @@ function WinnerBanner({
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-success">
               Deal reached
             </p>
+            <Badge tone="neutral" dot={false}>
+              <ShoppingBag className="size-3" aria-hidden="true" />
+              {productName || "Your purchase"}
+            </Badge>
             {deal ? <Badge tone="neutral">{deal.status === "complete" ? "Paid in full" : "Payment due"}</Badge> : null}
           </div>
           <p className="mt-0.5 truncate text-[15px] font-semibold text-ink">

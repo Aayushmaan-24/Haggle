@@ -24,7 +24,12 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/LoadingState";
-import { ApiError, compilePolicy, NEGOTIATE_DEFAULTS } from "@/lib/api";
+import {
+  ApiError,
+  compilePolicy,
+  createManualPolicy,
+  NEGOTIATE_DEFAULTS,
+} from "@/lib/api";
 import type { CompiledPolicy } from "@/lib/types";
 import {
   forgetPolicy,
@@ -90,9 +95,31 @@ function formatPercent(value: number): string {
 }
 
 type Status = "idle" | "building" | "success" | "error";
+type PolicyMode = "rules" | "quick";
+
+type QuickForm = {
+  name: string;
+  list: string;
+  floor: string;
+  deposit: string;
+  delivery: string;
+  personality: string;
+};
+
+const EMPTY_QUICK_FORM: QuickForm = {
+  name: "",
+  list: "",
+  floor: "",
+  deposit: "30",
+  delivery: "3",
+  personality: "friendly but firm",
+};
 
 export default function PolicyPage() {
+  const [mode, setMode] = useState<PolicyMode>("rules");
   const [rules, setRules] = useState("");
+  const [quick, setQuick] = useState<QuickForm>(EMPTY_QUICK_FORM);
+  const [quickTouched, setQuickTouched] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [policy, setPolicy] = useState<CompiledPolicy | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +136,51 @@ export default function PolicyPage() {
         : null;
   const showRulesError = Boolean(rulesError) && touched;
   const building = status === "building";
+
+  const quickList = Number(quick.list);
+  const quickFloor = Number(quick.floor);
+  const quickDeposit = Number(quick.deposit);
+  const quickDelivery = Number(quick.delivery);
+  const quickNameError = quick.name.trim() ? null : "Enter your shop name.";
+  const quickListError =
+    quick.list.trim() === ""
+      ? "Enter a list price."
+      : Number.isFinite(quickList) && quickList > 0
+        ? null
+        : "List price must be greater than $0.";
+  const quickFloorError =
+    quick.floor.trim() === ""
+      ? "Enter your lowest price."
+      : !Number.isFinite(quickFloor) || quickFloor <= 0
+        ? "Lowest price must be greater than $0."
+        : Number.isFinite(quickList) && quickList > 0 && quickFloor > quickList
+          ? "Lowest price cannot be above the list price."
+          : null;
+  const quickDepositError =
+    quick.deposit.trim() === ""
+      ? "Enter a deposit percent."
+      : Number.isFinite(quickDeposit) && quickDeposit >= 0 && quickDeposit <= 100
+        ? null
+        : "Deposit must be between 0 and 100%.";
+  const quickDeliveryError =
+    quick.delivery.trim() === ""
+      ? "Enter delivery days."
+      : Number.isInteger(quickDelivery) &&
+          quickDelivery >= 1 &&
+          quickDelivery <= 30
+        ? null
+        : "Delivery must be a whole number from 1 to 30 days.";
+  const quickValid =
+    !quickNameError &&
+    !quickListError &&
+    !quickFloorError &&
+    !quickDepositError &&
+    !quickDeliveryError;
+  const showQuickErrors = quickTouched;
+
+  function updateQuick(field: keyof QuickForm, value: string) {
+    setQuick((current) => ({ ...current, [field]: value }));
+  }
 
   async function submit() {
     setTouched(true);
@@ -137,6 +209,40 @@ export default function PolicyPage() {
     void submit();
   }
 
+  async function submitQuick() {
+    setQuickTouched(true);
+    if (!quickValid) return;
+
+    setStatus("building");
+    setError(null);
+
+    try {
+      const created = await createManualPolicy({
+        name: quick.name.trim(),
+        list_price: quickList,
+        floor: quickFloor,
+        deposit_percent: quickDeposit,
+        delivery_days: quickDelivery,
+        personality: quick.personality.trim() || "friendly but firm",
+      });
+      rememberPolicy(created);
+      setPolicy(created);
+      setStatus("success");
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError
+          ? cause.message
+          : "We could not create that policy. Check your connection, then try again.",
+      );
+      setStatus("error");
+    }
+  }
+
+  function handleQuickSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitQuick();
+  }
+
   function chooseExample(example: string) {
     setRules(example);
     setTouched(false);
@@ -150,7 +256,7 @@ export default function PolicyPage() {
       <PageHeader
         eyebrow="Seller console"
         title="Seller Policy"
-        description="Describe how you sell, in your own words. Haggle turns it into clear rules your seller agent follows for every offer."
+        description="Describe how you sell in your own words, or enter the exact terms in the quick form. Both become rules your seller agent follows for every offer."
         actions={
           <>
             <Badge tone="neutral" dot={false}>
@@ -172,12 +278,12 @@ export default function PolicyPage() {
         <section aria-labelledby="composer-heading" className="card">
           <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
             <div>
-              <p className="label mb-1.5 text-accent">Step 1 · Describe</p>
+              <p className="label mb-1.5 text-accent">Step 1 · Compose</p>
               <h2 id="composer-heading" className="text-h3 font-semibold text-ink">
-                Your selling rules
+                Build your seller policy
               </h2>
               <p className="mt-0.5 text-small text-muted">
-                Plain English. Prices, percentages and delivery times all help.
+                Describe it in plain English, or enter the exact terms yourself.
               </p>
             </div>
             <span className="num shrink-0 rounded-pill border border-line bg-surface-2 px-2 py-1 text-[10px] text-faint">
@@ -185,7 +291,59 @@ export default function PolicyPage() {
             </span>
           </div>
 
-          <form onSubmit={handleSubmit} aria-busy={building} className="p-5">
+          <div className="border-b border-line px-5 py-3">
+            <div
+              role="tablist"
+              aria-label="Policy input method"
+              className="inline-flex rounded-control border border-line bg-surface-2 p-1"
+            >
+              <button
+                type="button"
+                role="tab"
+                id="rules-tab"
+                aria-selected={mode === "rules"}
+                aria-controls="rules-panel"
+                onClick={() => setMode("rules")}
+                disabled={building}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-[7px] px-3 text-[12px] font-medium transition-colors",
+                  mode === "rules"
+                    ? "bg-surface-3 text-ink shadow-inset"
+                    : "text-muted hover:text-ink",
+                )}
+              >
+                <Wand2 className="size-3.5 text-accent" aria-hidden="true" />
+                Describe in words
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="quick-tab"
+                aria-selected={mode === "quick"}
+                aria-controls="quick-panel"
+                onClick={() => setMode("quick")}
+                disabled={building}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-[7px] px-3 text-[12px] font-medium transition-colors",
+                  mode === "quick"
+                    ? "bg-surface-3 text-ink shadow-inset"
+                    : "text-muted hover:text-ink",
+                )}
+              >
+                <Store className="size-3.5 text-accent" aria-hidden="true" />
+                Quick form
+              </button>
+            </div>
+          </div>
+
+          <form
+            id="rules-panel"
+            role="tabpanel"
+            aria-labelledby="rules-tab"
+            onSubmit={handleSubmit}
+            aria-busy={building}
+            className={cn("p-5", mode !== "rules" && "hidden")}
+          >
             <label htmlFor="rules" className="block text-[13px] font-medium text-ink">
               How should your seller behave?
             </label>
@@ -267,6 +425,239 @@ export default function PolicyPage() {
             <p role="status" className="sr-only">
               {building
                 ? "Building your policy."
+                : status === "success"
+                  ? "Policy ready."
+                  : ""}
+            </p>
+          </form>
+
+          <form
+            id="quick-panel"
+            role="tabpanel"
+            aria-labelledby="quick-tab"
+            onSubmit={handleQuickSubmit}
+            aria-busy={building}
+            className={cn("p-5", mode !== "quick" && "hidden")}
+          >
+            <p className="text-small leading-relaxed text-muted">
+              Enter the exact terms your seller agent should use. They are checked
+              before the policy is saved.
+            </p>
+
+            <div className="mt-4">
+              <label htmlFor="quick-name" className="block text-[13px] font-medium text-ink">
+                Shop name
+              </label>
+              <input
+                id="quick-name"
+                value={quick.name}
+                onChange={(event) => updateQuick("name", event.target.value)}
+                onBlur={() => setQuickTouched(true)}
+                maxLength={40}
+                placeholder="e.g. Northwind Supply"
+                aria-invalid={Boolean(showQuickErrors && quickNameError) || undefined}
+                aria-describedby={
+                  showQuickErrors && quickNameError ? "quick-name-error" : undefined
+                }
+                className={cn(
+                  "field mt-2",
+                  showQuickErrors && quickNameError && "border-danger-line",
+                )}
+              />
+              {showQuickErrors && quickNameError ? (
+                <p id="quick-name-error" role="alert" className="mt-1 text-[11px] text-danger">
+                  {quickNameError}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="quick-list" className="block text-[13px] font-medium text-ink">
+                  List price
+                </label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-small text-faint">
+                    $
+                  </span>
+                  <input
+                    id="quick-list"
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={quick.list}
+                    onChange={(event) => updateQuick("list", event.target.value)}
+                    onBlur={() => setQuickTouched(true)}
+                    placeholder="120.00"
+                    aria-invalid={Boolean(showQuickErrors && quickListError) || undefined}
+                    aria-describedby={
+                      showQuickErrors && quickListError ? "quick-list-error" : undefined
+                    }
+                    className={cn(
+                      "field num pl-6",
+                      showQuickErrors && quickListError && "border-danger-line",
+                    )}
+                  />
+                </div>
+                {showQuickErrors && quickListError ? (
+                  <p id="quick-list-error" role="alert" className="mt-1 text-[11px] text-danger">
+                    {quickListError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor="quick-floor" className="block text-[13px] font-medium text-ink">
+                  Lowest price
+                </label>
+                <div className="relative mt-2">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-small text-faint">
+                    $
+                  </span>
+                  <input
+                    id="quick-floor"
+                    type="number"
+                    min={0.01}
+                    step="0.01"
+                    inputMode="decimal"
+                    value={quick.floor}
+                    onChange={(event) => updateQuick("floor", event.target.value)}
+                    onBlur={() => setQuickTouched(true)}
+                    placeholder="96.00"
+                    aria-invalid={Boolean(showQuickErrors && quickFloorError) || undefined}
+                    aria-describedby={
+                      showQuickErrors && quickFloorError ? "quick-floor-error" : undefined
+                    }
+                    className={cn(
+                      "field num pl-6",
+                      showQuickErrors && quickFloorError && "border-danger-line",
+                    )}
+                  />
+                </div>
+                {showQuickErrors && quickFloorError ? (
+                  <p id="quick-floor-error" role="alert" className="mt-1 text-[11px] text-danger">
+                    {quickFloorError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor="quick-deposit" className="block text-[13px] font-medium text-ink">
+                  Deposit percent
+                </label>
+                <input
+                  id="quick-deposit"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="1"
+                  inputMode="numeric"
+                  value={quick.deposit}
+                  onChange={(event) => updateQuick("deposit", event.target.value)}
+                  onBlur={() => setQuickTouched(true)}
+                  aria-invalid={Boolean(showQuickErrors && quickDepositError) || undefined}
+                  aria-describedby={
+                    showQuickErrors && quickDepositError ? "quick-deposit-error" : undefined
+                  }
+                  className={cn(
+                    "field num mt-2",
+                    showQuickErrors && quickDepositError && "border-danger-line",
+                  )}
+                />
+                {showQuickErrors && quickDepositError ? (
+                  <p id="quick-deposit-error" role="alert" className="mt-1 text-[11px] text-danger">
+                    {quickDepositError}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor="quick-delivery" className="block text-[13px] font-medium text-ink">
+                  Delivery days
+                </label>
+                <input
+                  id="quick-delivery"
+                  type="number"
+                  min={1}
+                  max={30}
+                  step="1"
+                  inputMode="numeric"
+                  value={quick.delivery}
+                  onChange={(event) => updateQuick("delivery", event.target.value)}
+                  onBlur={() => setQuickTouched(true)}
+                  aria-invalid={Boolean(showQuickErrors && quickDeliveryError) || undefined}
+                  aria-describedby={
+                    showQuickErrors && quickDeliveryError
+                      ? "quick-delivery-error"
+                      : undefined
+                  }
+                  className={cn(
+                    "field num mt-2",
+                    showQuickErrors && quickDeliveryError && "border-danger-line",
+                  )}
+                />
+                {showQuickErrors && quickDeliveryError ? (
+                  <p
+                    id="quick-delivery-error"
+                    role="alert"
+                    className="mt-1 text-[11px] text-danger"
+                  >
+                    {quickDeliveryError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <label
+                htmlFor="quick-personality"
+                className="block text-[13px] font-medium text-ink"
+              >
+                Personality
+              </label>
+              <textarea
+                id="quick-personality"
+                rows={2}
+                maxLength={120}
+                value={quick.personality}
+                onChange={(event) => updateQuick("personality", event.target.value)}
+                placeholder="e.g. friendly but firm, never rushes a deal"
+                aria-describedby="quick-personality-help"
+                className="field mt-2 h-auto resize-y py-2 leading-relaxed"
+              />
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <p id="quick-personality-help" className="text-[11px] text-faint">
+                  Short text the seller agent uses for its tone.
+                </p>
+                <span className="num text-[11px] text-faint">
+                  {quick.personality.length}/120
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[12px] leading-relaxed text-muted">
+                Saved automatically with the policy ID the backend returns.
+              </p>
+              <Button type="submit" disabled={building} className="shrink-0">
+                {building ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Creating…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-4" aria-hidden="true" />
+                    Create policy
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <p role="status" className="sr-only">
+              {building
+                ? "Creating your policy."
                 : status === "success"
                   ? "Policy ready."
                   : ""}
