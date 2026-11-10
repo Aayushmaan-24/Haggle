@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import catalog
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -208,6 +209,36 @@ def compile_policy(body: RulesIn):
     if not body.rules.strip() or len(body.rules) > 2000:
         raise HTTPException(400, "rules must be 1 to 2000 characters")
     policy = policy_compiler.compile_rules(body.rules)
+    pid = uuid.uuid4().hex[:12]
+    POLICIES[pid] = policy
+    return {**policy, "policy_id": pid}
+@app.get("/api/products")
+def products():
+    return catalog.PRODUCTS
+
+
+class ManualPolicyIn(BaseModel):
+    name: str
+    list_price: float
+    floor: float
+    deposit_percent: float = 30
+    delivery_days: int = 3
+    personality: str = "friendly but firm"
+
+
+@app.post("/api/policy/manual")
+def manual_policy(body: ManualPolicyIn):
+    if not (0 < body.floor <= body.list_price <= 1_000_000):
+        raise HTTPException(400, "floor must be above 0 and not above the list price")
+    policy = {
+        "name": (body.name.strip() or "Your Shop")[:40],
+        "list_price": round(body.list_price, 2),
+        "floor": round(body.floor, 2),
+        "deposit_percent": min(max(body.deposit_percent, 0.0), 100.0),
+        "delivery_days": min(max(body.delivery_days, 1), 30),
+        "personality": body.personality.strip()[:120] or "friendly but firm",
+        "notes": "Created from the form.",
+    }
     pid = uuid.uuid4().hex[:12]
     POLICIES[pid] = policy
     return {**policy, "policy_id": pid}
