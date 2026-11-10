@@ -14,6 +14,7 @@ import {
 import { ButtonLink } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { RecentDeals } from "@/components/overview/RecentDeals";
 
 export const metadata: Metadata = {
   title: "Overview",
@@ -110,6 +111,9 @@ export default function OverviewPage() {
         </div>
       </section>
 
+      {/* Recent deals -------------------------------------------------- */}
+      <RecentDeals />
+
       {/* How it works -------------------------------------------------- */}
       <section aria-labelledby="how-heading">
         <SectionHeader
@@ -172,8 +176,8 @@ export default function OverviewPage() {
             },
             {
               icon: Timer,
-              title: "Session memory",
-              body: "Deals and compiled policies stay available for this demo session. They are not a permanent record.",
+              title: "Browser history",
+              body: "Deals are tied to this browser, which keeps a copy of each one, so your history survives a refresh or a backend restart. It is still not a permanent record.",
             },
           ].map((item) => {
             const Icon = item.icon;

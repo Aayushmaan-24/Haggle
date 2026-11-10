@@ -69,7 +69,7 @@ The app uses the PayPal **sandbox** only, so no real money moves. A sandbox buye
 3. When the winner appears, click **Pay deposit with PayPal** and log in on the PayPal sandbox page with the provided buyer account.
 4. After approval you land on the receipt. Click **Confirm delivery** to release the balance.
 
-If a page says the deal is unknown, run the negotiation again: deals are kept in server memory and a restart clears them.
+Deals belong to the browser that created them (an anonymous, signed cookie — there is no login). The backend keeps them in memory only, so a restart clears its copy; your browser keeps a saved copy of each one, and the receipt and Recent Deals fall back to it with the payment status clearly marked as unverified. Payment and delivery are only possible while the backend still has the live record.
 
 ## Run it yourself
 
@@ -93,6 +93,7 @@ cp .env.example .env
 | `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET` | Credentials of your sandbox REST app |
 | `GEMINI_API_KEY` | Your Gemini API key |
 | `GEMINI_MODEL` | Primary model, default `gemini-3.5-flash-lite` |
+| `SESSION_SECRET` | Long random string used to sign the anonymous browser-identity cookie. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Changing it signs everyone out and orphans existing in-memory deals. |
 | `SELLER_EMAIL_FIRM_CO`, `SELLER_EMAIL_FLEX_LTD`, `SELLER_EMAIL_PREMIUM_HUB` | Emails of three US Business sandbox accounts, one per default seller |
 | `SELLER_EMAIL_CUSTOM` | Email of a fourth Business sandbox account, used when a custom seller wins |
 | `PUBLIC_BASE_URL`, `FRONTEND_URL` | Where PayPal sends the buyer back. Use `http://localhost:8000` for both when running locally |
@@ -126,7 +127,7 @@ For frontend development, run `npm run dev` inside `frontend/` (port 3000) while
 
 - Build command: `pip install -r backend/requirements.txt`
 - Start command: `cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT`
-- Add every variable from `.env.example`, with `PUBLIC_BASE_URL` and `FRONTEND_URL` set to your Render URL (no trailing slash).
+- Add every variable from `.env.example`, with `PUBLIC_BASE_URL` and `FRONTEND_URL` set to your Render URL (no trailing slash). Set a long random `SESSION_SECRET` there too — without it the app falls back to an ephemeral secret and every restart gives browsers a new identity.
 - `frontend/out` is committed to the repository, because the build command does not build the frontend. Rebuild and commit it after every frontend change.
 
 ## API
@@ -135,10 +136,13 @@ For frontend development, run `npm run dev` inside `frontend/` (port 3000) while
 |---|---|
 | `GET /api/negotiate` | Streams negotiation events. Params: `item`, `budget`, `target`, `policy_id`, `prices`, `replay` |
 | `POST /api/policy/compile` | Turns plain-English seller rules into a policy and returns a `policy_id` |
-| `GET /api/deals/{id}` | Reads a deal |
+| `GET /api/deals` | Lists this browser's deals, newest first. Param: `limit` |
+| `GET /api/deals/{id}` | Reads a deal owned by this browser; anything else is a 404 |
 | `POST /api/deals/{id}/pay` | Creates the PayPal order and returns the approval URL |
-| `GET /paypal/return` | PayPal redirect: authorizes the order, captures the deposit, and redirects to the receipt |
+| `GET /paypal/return` | PayPal redirect: authorizes the order, captures the deposit, and redirects to the receipt. The signed `state` parameter must match the deal owner |
 | `POST /api/deals/{id}/deliver` | Confirms delivery and captures the balance |
+
+Deal endpoints identify the caller with an anonymous `haggle_uid` cookie: a random id signed with `SESSION_SECRET` and set `HttpOnly`. Every deal records its owner, and listing, reading, paying, delivering and completing a PayPal return all require the same owner. No account or login is involved.
 
 `prices` is a JSON object that overrides a default seller's prices, for example `{"Flex Ltd":{"list":120,"floor":90}}`. The floor must be above 0 and not above the list price.
 
@@ -160,7 +164,8 @@ To reproduce: `cd backend && python benchmark.py 8` (takes a while on free-tier 
 
 - The default sellers are simulated agents with synthetic catalogs. The Seller Console shows how a real merchant would plug in.
 - Payments run in the PayPal **sandbox** only. No real money moves.
-- Deals and compiled policies are kept in server memory (Render's free disk is ephemeral), so a server restart clears them.
+- Deals and compiled policies are kept in server memory (Render's free disk is ephemeral), so a server restart clears the server's copy. Each browser keeps a localStorage copy of its own deals for display, so history stays readable, but this is not a database and payment status in a saved copy is unverified.
+- Identity is per browser: clearing cookies or using a different browser/device starts a new anonymous identity and will not show earlier deals.
 - Free-tier Gemini limits can slow or interrupt live negotiations. When that happens the app falls back to a recorded negotiation (`data/replay.json`) and tells the user.
 
 ## License

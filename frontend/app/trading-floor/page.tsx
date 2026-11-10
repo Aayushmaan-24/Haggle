@@ -26,7 +26,8 @@ import {
   Wallet,
 } from "lucide-react";
 import type { SseEvent } from "@/lib/sse";
-import { useNegotiation } from "@/lib/useNegotiation";
+import { useNegotiationSession } from "@/lib/negotiationStore";
+import type { NegotiationState } from "@/lib/useNegotiation";
 import { getProducts, payDeal } from "@/lib/api";
 import type { Deal, Product } from "@/lib/types";
 import {
@@ -278,7 +279,11 @@ function derive(events: SseEvent[]): {
 const INPUT_ERROR = "border-danger-line";
 
 export default function TradingFloorPage() {
-  const [state, control] = useNegotiation();
+  // Owned by NegotiationProvider (mounted once in AppShell), so the stream and the
+  // transcript survive navigating to Overview and back.
+  const { state, run, startNegotiation, stopListening, resetNegotiation } =
+    useNegotiationSession();
+  const { runSignature, runProductName, runTarget, attemptedPolicyId } = run;
   const savedPolicies = useSavedPolicies();
   const savedProducts = useSavedProducts();
   const [activePolicyId, setActivePolicyId] = useState("");
@@ -289,11 +294,9 @@ export default function TradingFloorPage() {
   const [budget, setBudget] = useState(String(FALLBACK_PRODUCT.budget));
   const [target, setTarget] = useState(String(FALLBACK_PRODUCT.target));
   const [replay, setReplay] = useState(false);
-  const [runTarget, setRunTarget] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState<{ item?: boolean; budget?: boolean; target?: boolean }>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [attemptedPolicyId, setAttemptedPolicyId] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [sellerPricesOpen, setSellerPricesOpen] = useState(false);
@@ -306,8 +309,6 @@ export default function TradingFloorPage() {
   const [selectedProductId, setSelectedProductId] = useState(FALLBACK_PRODUCT.id);
   const [customName, setCustomName] = useState("");
   const [customNotice, setCustomNotice] = useState<string | null>(null);
-  const [runSignature, setRunSignature] = useState<string | null>(null);
-  const [runProductName, setRunProductName] = useState("");
   const [persistSetup, setPersistSetup] = useState(false);
   const restoreAttemptedRef = useRef(false);
   const productSelectRef = useRef<HTMLSelectElement>(null);
@@ -743,6 +744,10 @@ export default function TradingFloorPage() {
     if (replay) return;
     setPersistSetup(true);
 
+    // Clearing the mandate discards the run that belongs to it. Never do that while
+    // a negotiation is still live: the backend would keep running unseen.
+    if (!sessionActive) resetNegotiation();
+
     if (selectedSavedProduct) {
       applyProduct(selectedSavedProduct, { custom: true, expandPrices: true });
       return;
@@ -783,8 +788,9 @@ export default function TradingFloorPage() {
     setSelectedPolicyId("");
     setTouched({});
     setSubmitAttempted(false);
-    setAttemptedPolicyId(null);
     setPayError(null);
+    // Disabled while a run is live, so this only closes a finished or stopped run.
+    resetNegotiation();
   }
 
   function updateSellerPrice(
@@ -843,21 +849,23 @@ export default function TradingFloorPage() {
     if (!isValid || sellerPricesBlocking || submitting || sessionActive) return;
 
     setSubmitting(true);
-    setRunSignature(currentSignature);
-    setRunProductName(selectedProductLabel);
-    setAttemptedPolicyId(policyId ?? null);
-    setRunTarget(parsedTarget);
     setPayError(null);
-    void control
-      .startNegotiation({
+    void startNegotiation(
+      {
         item: item.trim(),
         budget: parsedBudget,
         target: parsedTarget,
         replay,
         policyId,
         sellerPrices: liveSellerPrices(),
-      })
-      .finally(() => setSubmitting(false));
+      },
+      {
+        runSignature: currentSignature,
+        runProductName: selectedProductLabel,
+        runTarget: parsedTarget,
+        attemptedPolicyId: policyId ?? null,
+      },
+    ).finally(() => setSubmitting(false));
   }
 
   async function pay() {
@@ -912,7 +920,7 @@ export default function TradingFloorPage() {
             </span>
           ) : null}
           {sessionActive ? (
-            <Button variant="secondary" size="sm" onClick={control.stopListening}>
+            <Button variant="secondary" size="sm" onClick={stopListening}>
               Stop listening
             </Button>
           ) : null}
@@ -2153,7 +2161,7 @@ function OffersTable({ offers }: { offers: UiOffer[] }) {
 /* Winner + payment                                                   */
 /* ------------------------------------------------------------------ */
 
-type Winner = NonNullable<NonNullable<ReturnType<typeof useNegotiation>[0]["result"]>["winner"]>;
+type Winner = NonNullable<NonNullable<NegotiationState["result"]>["winner"]>;
 
 function WinnerBanner({
   winner,

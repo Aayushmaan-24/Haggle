@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
+import { NegotiationProvider } from "@/lib/negotiationStore";
 import { MobileTabBar } from "./MobileTabBar";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
-/** Sidebar + sticky top bar + content column + mobile tab bar. */
+/**
+ * Sidebar + sticky top bar + content column + mobile tab bar.
+ *
+ * The shell is rendered once by the root layout, so the negotiation provider mounted
+ * here keeps an ongoing Trading Floor run alive while the user visits other routes.
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-transparent">
@@ -22,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="main"
           className="mx-auto w-full max-w-[1600px] px-4 pb-28 pt-5 sm:px-6 md:pb-12 lg:px-8"
         >
-          {children}
+          <NegotiationProvider>{children}</NegotiationProvider>
         </main>
       </div>
 

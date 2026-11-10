@@ -1,4 +1,6 @@
 import os
+from urllib.parse import urlencode
+
 import httpx
 from dotenv import load_dotenv
 
@@ -30,7 +32,12 @@ def _check(r: httpx.Response) -> httpx.Response:
     return r
 
 
-def create_order(amount: str, seller_email: str) -> dict:
+def create_order(amount: str, seller_email: str, return_state: str | None = None) -> dict:
+    return_url = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000") + "/paypal/return"
+    if return_state:
+        # PayPal preserves query parameters on the return URL. The signed value lets the
+        # backend check that the order belongs to the browser that started it.
+        return_url = f"{return_url}?{urlencode({'state': return_state})}"
     body = {
         "intent": "AUTHORIZE",
         "purchase_units": [{
@@ -38,7 +45,7 @@ def create_order(amount: str, seller_email: str) -> dict:
             "payee": {"email_address": seller_email},
         }],
         "payment_source": {"paypal": {"experience_context": {
-            "return_url": os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000") + "/paypal/return",
+            "return_url": return_url,
             "cancel_url": os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000") + "/paypal/cancel",
             "user_action": "PAY_NOW",
         }}},

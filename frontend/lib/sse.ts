@@ -317,6 +317,8 @@ export async function openNegotiationStream(
   const controller = new AbortController();
   const response = await fetch(url, {
     signal: controller.signal,
+    // Needed in cross-origin dev so the identity cookie reaches `/api/negotiate`.
+    credentials: "include",
   });
 
   if (!response.ok) {

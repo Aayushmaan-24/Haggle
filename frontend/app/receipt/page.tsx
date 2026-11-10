@@ -27,6 +27,7 @@ import { LoadingState, Skeleton } from "@/components/ui/LoadingState";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ApiError, deliverDeal, getDeal, getProducts, payDeal } from "@/lib/api";
 import type { Deal, DealStatus, Product } from "@/lib/types";
+import { findSavedDeal } from "@/lib/dealStore";
 import { useSavedProducts } from "@/lib/productStore";
 import { cn } from "@/lib/cn";
 
@@ -66,6 +67,7 @@ type ReceiptState =
   | { kind: "missing" }
   | { kind: "loading"; dealId: string }
   | { kind: "ready"; dealId: string; deal: Deal }
+  | { kind: "cached"; dealId: string; deal: Deal; savedAt: string }
   | { kind: "not-found"; dealId: string }
   | { kind: "error"; dealId: string; message: string };
 
@@ -199,6 +201,19 @@ function ReceiptBody() {
       .catch((cause: unknown) => {
         if (cancelled) return;
 
+        // The backend forgets deals on restart. A snapshot saved in this browser keeps
+        // the terms readable, but its payment state is never treated as live.
+        const saved = findSavedDeal(requestedId);
+        if (saved) {
+          setState({
+            kind: "cached",
+            dealId: requestedId,
+            deal: saved.deal,
+            savedAt: saved.savedAt,
+          });
+          return;
+        }
+
         if (cause instanceof ApiError && cause.status === 404) {
           setState({ kind: "not-found", dealId: requestedId });
           return;
@@ -242,6 +257,7 @@ function ReceiptBody() {
         <LoadErrorState dealId={state.dealId} message={state.message} onRetry={retry} />
       );
     case "ready":
+    case "cached":
       return (
         <DealReceipt
           deal={state.deal}
@@ -251,6 +267,9 @@ function ReceiptBody() {
             savedProducts,
           )}
           fallbackId={state.dealId}
+          cached={state.kind === "cached"}
+          savedAt={state.kind === "cached" ? state.savedAt : null}
+          onRetry={state.kind === "cached" ? retry : undefined}
           onDealUpdated={(deal) => setState({ kind: "ready", dealId: state.dealId, deal })}
         />
       );
@@ -347,7 +366,7 @@ function UnknownDealState({
       <EmptyState
         icon={ReceiptText}
         title="We could not find that receipt"
-        description="The link may be incomplete, or the deal may have expired with this session. Start a new negotiation to create a fresh receipt."
+        description="The link may be incomplete, or this browser may not have a saved copy of the deal. The backend also forgets deals when it restarts. Start a new negotiation to create a fresh receipt."
         action={
           <div className="flex flex-wrap justify-center gap-2">
             <ButtonLink href="/trading-floor">Start a negotiation</ButtonLink>
@@ -404,11 +423,18 @@ function DealReceipt({
   deal,
   productName,
   fallbackId,
+  cached = false,
+  savedAt = null,
+  onRetry,
   onDealUpdated,
 }: {
   deal: Deal;
   productName: string | null;
   fallbackId: string;
+  /** True when the backend has no record and these terms come from localStorage. */
+  cached?: boolean;
+  savedAt?: string | null;
+  onRetry?: () => void;
   onDealUpdated: (deal: Deal) => void;
 }) {
   const [actionStatus, setActionStatus] = useState<"idle" | "paying" | "delivering">(
@@ -454,9 +480,11 @@ function DealReceipt({
   const depositLabel = formatMoney(deposit);
   const balanceLabel = formatMoney(balance);
   const totalLabel = formatMoney(total);
+  const savedAtLabel = savedAt ? new Date(savedAt).toLocaleString() : null;
 
   async function handlePay() {
-    if (actionStatus !== "idle") return;
+    // A saved copy is not proof the backend still knows this deal; never pay from it.
+    if (cached || actionStatus !== "idle") return;
     setActionError(null);
     setActionStatus("paying");
 
@@ -475,7 +503,7 @@ function DealReceipt({
   }
 
   async function handleDeliver() {
-    if (actionStatus !== "idle") return;
+    if (cached || actionStatus !== "idle") return;
     setActionError(null);
     setActionStatus("delivering");
 
@@ -496,7 +524,9 @@ function DealReceipt({
   return (
     <div className="space-y-4">
       <p role="status" className="sr-only">
-        {`Receipt ${receiptId} loaded. ${statusCopy.headline}.`}
+        {cached
+          ? `Saved copy of receipt ${receiptId} loaded. Payment status is not live.`
+          : `Receipt ${receiptId} loaded. ${statusCopy.headline}.`}
       </p>
 
       {/* Invoice header ---------------------------------------------- */}
@@ -517,6 +547,7 @@ function DealReceipt({
               ) : (
                 <Badge tone="neutral">Status unavailable</Badge>
               )}
+              {cached ? <Badge tone="neutral">Saved copy · not live</Badge> : null}
             </div>
             <h2 className="mt-3 break-words text-[26px] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[30px]">
               {productName ?? (item ? capitalize(item) : "Your purchase")}
@@ -553,6 +584,27 @@ function DealReceipt({
           </div>
         </div>
       </section>
+
+      {cached ? (
+        <div
+          role="note"
+          className="rounded-panel border border-warning-line bg-warning-soft px-4 py-3 text-[12px] leading-relaxed text-warning"
+        >
+          <p className="font-semibold">Saved copy — payment status is unverified</p>
+          <p className="mt-1">
+            These terms were saved in this browser
+            {savedAtLabel ? ` on ${savedAtLabel}` : ""}. The backend has no live record
+            of this deal, so the status shown above is the last one we saw and may be out
+            of date. Payment and delivery actions are disabled until the backend knows the
+            deal again.
+          </p>
+          {onRetry ? (
+            <Button variant="ghost" onClick={onRetry} className="mt-2">
+              Check the backend again
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
@@ -706,6 +758,8 @@ function DealReceipt({
             status={status}
             deposit={deposit}
             balance={balance}
+            cached={cached}
+            onRetry={onRetry}
             paying={actionStatus === "paying"}
             delivering={actionStatus === "delivering"}
             busy={actionStatus !== "idle"}
@@ -738,7 +792,9 @@ function DealReceipt({
               <DetailRow label="Reference" value={receiptId} mono />
             </dl>
             <p className="mt-4 border-t border-line pt-4 text-[11px] leading-relaxed text-faint">
-              This receipt shows the latest payment status we have. Reload to refresh it.
+              {cached
+                ? "Saved in this browser for reference. Payment status is not live, so payment and delivery cannot be completed from this copy."
+                : "This receipt shows the latest payment status we have. Reload to refresh it."}
             </p>
           </section>
 
@@ -766,20 +822,24 @@ function ActionPanel({
   status,
   deposit,
   balance,
+  cached,
   paying,
   delivering,
   busy,
   error,
+  onRetry,
   onPay,
   onDeliver,
 }: {
   status: DealStatus | null;
   deposit: number | null;
   balance: number | null;
+  cached: boolean;
   paying: boolean;
   delivering: boolean;
   busy: boolean;
   error: string | null;
+  onRetry?: () => void;
   onPay: () => void;
   onDeliver: () => void;
 }) {
@@ -789,6 +849,37 @@ function ActionPanel({
 
   const shell =
     "card relative overflow-hidden p-5";
+
+  // Cached terms are display-only: no payment or delivery control is rendered at all.
+  if (cached) {
+    return (
+      <section aria-labelledby="action-heading" className={shell}>
+        <div className="flex items-start gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-full border border-warning-line bg-warning-soft text-warning">
+            <ShieldCheck className="size-4" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="label mb-1 text-warning">Saved copy</p>
+            <h2 id="action-heading" className="text-h3 font-semibold text-ink">
+              Payment unavailable
+            </h2>
+            <p className="mt-1 text-[12px] leading-relaxed text-muted">
+              We cannot confirm this deal with the backend, so no payment or delivery is
+              offered. The terms shown are a saved copy for reference.
+            </p>
+          </div>
+        </div>
+        <ButtonLink href="/trading-floor" variant="secondary" className="mt-4 w-full">
+          Start a new negotiation
+        </ButtonLink>
+        {onRetry ? (
+          <Button variant="ghost" onClick={onRetry} className="mt-2 w-full">
+            Check the backend again
+          </Button>
+        ) : null}
+      </section>
+    );
+  }
 
   if (status === "negotiated") {
     return (

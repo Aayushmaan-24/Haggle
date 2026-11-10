@@ -5,6 +5,7 @@ import type {
   PayResponse,
   Product,
 } from "./types";
+import { rememberDeal, rememberDeals } from "./dealStore";
 
 const DEV_API_BASE = "http://localhost:8000";
 
@@ -81,6 +82,8 @@ async function readError(response: Response): Promise<ApiError> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(path), {
     cache: "no-store",
+    // The anonymous identity cookie is HttpOnly, so the browser attaches it here.
+    credentials: "include",
     ...init,
     headers: {
       Accept: "application/json",
@@ -93,9 +96,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** 404 means the deal left server memory (restart), which the UI explains explicitly. */
-export function getDeal(dealId: string): Promise<Deal> {
-  return request<Deal>(`/api/deals/${encodeURIComponent(dealId)}`);
+/**
+ * Latest deals in backend memory for this browser, newest first. `request` always
+ * bypasses HTTP caching, and the response refreshes the local snapshots used as an
+ * offline fallback.
+ */
+export async function getDeals(limit = 20): Promise<Deal[]> {
+  const deals = await request<Deal[]>(`/api/deals?limit=${limit}`);
+  if (Array.isArray(deals)) rememberDeals(deals);
+  return deals;
+}
+
+/**
+ * 404 means the deal is unknown to this browser or left server memory (restart). The
+ * receipt falls back to the saved snapshot; the backend never accepts that snapshot
+ * for payment or delivery.
+ */
+export async function getDeal(dealId: string): Promise<Deal> {
+  const deal = await request<Deal>(`/api/deals/${encodeURIComponent(dealId)}`);
+  rememberDeal(deal);
+  return deal;
 }
 
 /** Moves the deal to `awaiting_approval` and returns the PayPal approval URL. */
@@ -106,10 +126,13 @@ export function payDeal(dealId: string): Promise<PayResponse> {
 }
 
 /** Captures the remaining balance. Only valid while the deal is `deposit_paid`. */
-export function deliverDeal(dealId: string): Promise<Deal> {
-  return request<Deal>(`/api/deals/${encodeURIComponent(dealId)}/deliver`, {
-    method: "POST",
-  });
+export async function deliverDeal(dealId: string): Promise<Deal> {
+  const deal = await request<Deal>(
+    `/api/deals/${encodeURIComponent(dealId)}/deliver`,
+    { method: "POST" },
+  );
+  rememberDeal(deal);
+  return deal;
 }
 
 /** Compiles 1–2000 characters of plain-English rules into a seller policy. */
