@@ -872,11 +872,21 @@ export default function TradingFloorPage() {
     if (!dealId || paying) return;
     setPaying(true);
     setPayError(null);
+    // Open the tab during the click gesture so the browser allows it.
+    const paypalTab = window.open("about:blank", "_blank");
+    if (!paypalTab) {
+      setPayError("Allow pop-ups to open PayPal in a new tab.");
+      setPaying(false);
+      return;
+    }
+    paypalTab.opener = null;
     try {
       const response = await payDeal(dealId);
-      window.location.assign(response.approve_url);
+      paypalTab.location.replace(response.approve_url);
     } catch (cause) {
+      paypalTab.close();
       setPayError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
       setPaying(false);
     }
   }

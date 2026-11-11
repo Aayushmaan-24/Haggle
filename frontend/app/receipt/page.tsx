@@ -488,16 +488,26 @@ function DealReceipt({
     setActionError(null);
     setActionStatus("paying");
 
+    // Open the tab during the click gesture so the browser allows it.
+    const paypalTab = window.open("about:blank", "_blank");
+    if (!paypalTab) {
+      setActionError("Allow pop-ups to open PayPal in a new tab.");
+      setActionStatus("idle");
+      return;
+    }
+    paypalTab.opener = null;
+
     try {
       const { approve_url } = await payDeal(receiptId);
-      setActionStatus("idle");
-      window.location.assign(approve_url);
+      paypalTab.location.replace(approve_url);
     } catch (cause) {
+      paypalTab.close();
       setActionError(
         cause instanceof ApiError
           ? cause.message
           : "PayPal could not be opened. Try again in a moment.",
       );
+    } finally {
       setActionStatus("idle");
     }
   }
