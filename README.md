@@ -7,7 +7,7 @@
 Built for the PayPal AI Hackathon ("Build What's Next with PayPal and AI"). Tags: Web, Machine Learning/AI, Low/No Code.
 
 - **Live demo:** https://haggle-5xmi.onrender.com (free hosting tier: the first load after idle can take about a minute)
-- **Demo video:** TODO_YOUTUBE_LINK
+- **Demo video:** [Haggle](https://youtu.be/8DE2ovcgu40?si=2iDcHH2_ySgmS1rw)
 - **Code:** https://github.com/Aayushmaan-24/Haggle
 - **License:** MIT
 
